@@ -227,12 +227,28 @@ class PollService {
           continue;
         }
         
+        // For tasks with duration in Notion, fetch full details from Motion
+        // since listTasks doesn't return duration
+        let motionDuration = motionTask.duration;
+        if (notionTask.duration !== null && motionDuration === undefined) {
+          try {
+            const fullMotionTask = await motionClient.getTask(motionTask.id);
+            motionDuration = fullMotionTask.duration;
+            motionTask.duration = motionDuration; // Update for comparison
+          } catch (error) {
+            logger.error('Failed to fetch full Motion task details', {
+              taskId: motionTask.id,
+              error: error.message
+            });
+          }
+        }
+        
         // Log comparison for Raycast task
         if (notionTask.name === 'Raycast') {
           logger.info('DEBUG: Raycast task comparison', {
             notionDuration: notionTask.duration,
-            motionDuration: motionTask.duration,
-            durationsMatch: notionTask.duration === motionTask.duration,
+            motionDuration: motionDuration,
+            durationsMatch: notionTask.duration === motionDuration,
             notionStatus: notionTask.status,
             motionStatus: this.mapMotionStatusToNotion(motionTask.status?.name || motionTask.status)
           });
@@ -245,7 +261,7 @@ class PollService {
           notionTask.status !== this.mapMotionStatusToNotion(motionTask.status?.name || motionTask.status) ||
           notionTask.priority !== this.mapMotionPriorityToNotion(motionTask.priority) ||
           notionTask.dueDate !== motionTask.dueDate ||
-          notionTask.duration !== motionTask.duration;
+          notionTask.duration !== motionDuration;
         
         if (needsUpdate) {
           logger.info('Field change detected, syncing Notion to Motion', {
