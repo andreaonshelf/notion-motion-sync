@@ -21,6 +21,15 @@ const config = {
 };
 
 const validateConfig = () => {
+  console.log('=== Configuration Validation ===');
+  console.log('Environment variables loaded:', {
+    NOTION_API_KEY: !!process.env.NOTION_API_KEY,
+    NOTION_DATABASE_ID: !!process.env.NOTION_DATABASE_ID,
+    MOTION_API_KEY: !!process.env.MOTION_API_KEY,
+    MOTION_WORKSPACE_ID: !!process.env.MOTION_WORKSPACE_ID,
+    PORT: process.env.PORT || 3000
+  });
+  
   const required = [
     'motion.apiKey',
     'motion.workspaceId',
@@ -41,8 +50,12 @@ const validateConfig = () => {
   });
   
   if (missing.length > 0) {
+    console.error('❌ Missing required configuration:', missing);
+    console.error('Please set these environment variables in Railway');
     throw new Error(`Missing required configuration: ${missing.join(', ')}`);
   }
+  
+  console.log('✅ Configuration validated successfully');
 };
 
 module.exports = { config, validateConfig };

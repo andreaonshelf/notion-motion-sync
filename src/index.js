@@ -23,11 +23,30 @@ app.use((req, res, next) => {
   next();
 });
 
+app.get('/', (req, res) => {
+  res.json({ 
+    status: 'healthy', 
+    message: 'Notion-Motion sync service is running',
+    timestamp: new Date().toISOString(),
+    endpoints: {
+      health: '/health',
+      webhooks: '/webhooks/notion',
+      syncFull: '/sync/full',
+      syncMotionToNotion: '/sync/motion-to-notion'
+    }
+  });
+});
+
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'healthy', 
     timestamp: new Date().toISOString(),
-    service: 'notion-motion-sync'
+    service: 'notion-motion-sync',
+    config: {
+      notionConfigured: !!config.notion.apiKey,
+      motionConfigured: !!config.motion.apiKey,
+      pollingInterval: '1 minute'
+    }
   });
 });
 
