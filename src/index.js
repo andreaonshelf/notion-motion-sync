@@ -12,6 +12,7 @@ const debugRoutes = require('./routes/debug');
 const pollService = require('./services/pollService');
 const mappingCache = require('./services/mappingCache');
 const notionClient = require('./services/notionClient');
+const syncService = require('./services/syncService');
 
 const app = express();
 
@@ -122,6 +123,33 @@ const start = async () => {
       pollService.start(1);
       logger.info('Polling service started for Motion (1 minute interval)');
       logger.info('Notion webhook service ready for real-time updates');
+      
+      // On startup, sync any Notion tasks that don't have Motion IDs
+      setTimeout(async () => {
+        try {
+          logger.info('Checking for unsynced Notion tasks on startup...');
+          const tasks = await notionClient.queryDatabase();
+          const unsyncedTasks = tasks.filter(task => !task.motionTaskId);
+          
+          if (unsyncedTasks.length > 0) {
+            logger.info(`Found ${unsyncedTasks.length} unsynced Notion tasks, syncing...`);
+            for (const task of unsyncedTasks) {
+              try {
+                await syncService.syncNotionToMotion(task.id);
+                logger.info(`Synced unsynced task: ${task.name}`);
+                // Delay to avoid rate limits
+                await new Promise(resolve => setTimeout(resolve, 2000));
+              } catch (error) {
+                logger.error(`Failed to sync task ${task.name}`, { error: error.message });
+              }
+            }
+          } else {
+            logger.info('All Notion tasks already have Motion IDs');
+          }
+        } catch (error) {
+          logger.error('Error checking for unsynced tasks on startup', { error: error.message });
+        }
+      }, 5000); // Wait 5 seconds after startup
     });
   } catch (error) {
     logger.error('Failed to start server', { error: error.message });
