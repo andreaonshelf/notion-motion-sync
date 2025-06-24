@@ -174,6 +174,17 @@ class MotionClient {
     };
     return statusMap[notionStatus] || 'Todo';
   }
+
+  async deleteTask(taskId) {
+    try {
+      const response = await this.client.delete(`/tasks/${taskId}`);
+      logger.info('Task deleted in Motion', { taskId });
+      return response.data;
+    } catch (error) {
+      logger.error('Error deleting task in Motion', { taskId, error: error.message });
+      throw error;
+    }
+  }
 }
 
 module.exports = new MotionClient();

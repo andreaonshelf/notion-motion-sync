@@ -79,7 +79,20 @@ router.post('/notion', async (req, res) => {
       await syncService.syncNotionToMotion(pageId);
       res.json({ success: true, message: 'New page sync initiated' });
     } else if (event.type === 'page.deleted') {
-      await syncService.handleNotionDeletion(pageId);
+      // Try to extract Motion task ID from the event data
+      // Note: This might not be available if Notion doesn't send page properties on deletion
+      const motionTaskId = event.page?.properties?.['Motion Task ID']?.rich_text?.[0]?.plain_text || 
+                          event.data?.properties?.['Motion Task ID']?.rich_text?.[0]?.plain_text ||
+                          null;
+      
+      logger.info('Page deletion event details', {
+        pageId,
+        motionTaskId,
+        eventProperties: event.page?.properties ? Object.keys(event.page.properties) : 'No properties',
+        fullEvent: JSON.stringify(event)
+      });
+      
+      await syncService.handleNotionDeletion(pageId, motionTaskId);
       res.json({ success: true, message: 'Deletion handled' });
     } else {
       res.json({ success: true, message: 'Webhook received but no action taken' });

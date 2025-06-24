@@ -236,20 +236,26 @@ class SyncService {
     return description;
   }
 
-  async handleNotionDeletion(notionPageId) {
+  async handleNotionDeletion(notionPageId, motionTaskId) {
     try {
-      logger.info('Handling Notion page deletion', { notionPageId });
+      logger.info('Handling Notion page deletion', { notionPageId, motionTaskId });
       
-      // Get the Motion task ID from our tracking (if we have it)
-      // Since the page is deleted, we can't query it anymore
-      // In a production system, you'd want to maintain a mapping database
-      
-      // For now, we'll just log it
-      logger.info('Notion page deleted - Motion task will remain', { notionPageId });
-      
-      // TODO: Implement mapping database to track Motion IDs for deleted Notion pages
+      if (motionTaskId) {
+        // Delete the corresponding Motion task
+        await motionClient.deleteTask(motionTaskId);
+        logger.info('Notion page deleted - Motion task also deleted', { 
+          notionPageId, 
+          motionTaskId 
+        });
+      } else {
+        logger.warn('Notion page deleted but no Motion task ID found', { notionPageId });
+      }
     } catch (error) {
-      logger.error('Error handling Notion deletion', { notionPageId, error: error.message });
+      logger.error('Error handling Notion deletion', { 
+        notionPageId, 
+        motionTaskId,
+        error: error.message 
+      });
     }
   }
 
