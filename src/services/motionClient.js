@@ -75,8 +75,7 @@ class MotionClient {
         // Enable auto-scheduling and make it schedulable
         autoScheduled: {
           startDate: new Date().toISOString().split('T')[0], // Today
-          deadlineType: taskData.dueDate ? 'HARD' : 'SOFT',
-          schedule: 'WORK_HOURS'
+          deadlineType: taskData.dueDate ? 'HARD' : 'SOFT'
         }
       };
       
