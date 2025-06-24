@@ -1,0 +1,158 @@
+const axios = require('axios');
+const { config } = require('../config');
+const logger = require('../utils/logger');
+
+class MotionClient {
+  constructor() {
+    // Get the API key
+    const apiKey = config.motion.apiKey;
+    
+    // Log API key details for debugging
+    logger.info('Motion API key configured', { 
+      keyLength: apiKey ? apiKey.length : 0,
+      keyPreview: apiKey ? apiKey.substring(0, 10) + '...' : 'missing'
+    });
+    
+    this.client = axios.create({
+      baseURL: config.motion.apiUrl,
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    // Add request/response interceptors for debugging
+    this.client.interceptors.request.use((config) => {
+      // Set API key
+      config.headers['X-API-Key'] = apiKey;
+      
+      // Log outgoing request
+      logger.info('Motion API request', {
+        method: config.method,
+        url: config.url,
+        baseURL: config.baseURL,
+        fullURL: config.baseURL + config.url
+      });
+      
+      return config;
+    }, (error) => {
+      logger.error('Motion request error', { error: error.message });
+      return Promise.reject(error);
+    });
+    
+    this.client.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        logger.error('Motion API error response', {
+          status: error.response?.status,
+          statusText: error.response?.statusText,
+          data: JSON.stringify(error.response?.data),
+          url: error.config?.url,
+          method: error.config?.method,
+          requestData: error.config?.data ? JSON.stringify(error.config.data).substring(0, 200) : undefined
+        });
+        return Promise.reject(error);
+      }
+    );
+  }
+
+  async createTask(taskData) {
+    try {
+      const payload = {
+        workspaceId: config.motion.workspaceId,
+        name: taskData.name,
+        description: taskData.description,
+        dueDate: taskData.dueDate,
+        deadlineType: taskData.dueDate ? 'HARD' : 'NONE',
+        duration: 30, // Default 30 minutes for auto-scheduling
+        priority: this.mapPriority(taskData.priority),
+        status: this.mapStatus(taskData.status),
+        // Enable auto-scheduling and make it schedulable
+        autoScheduled: {
+          startDate: new Date().toISOString().split('T')[0], // Today
+          deadlineType: taskData.dueDate ? 'HARD' : 'SOFT',
+          schedule: 'WORK_HOURS'
+        }
+      };
+      
+      // Only add labels if they exist and are not empty
+      if (taskData.labels && taskData.labels.length > 0) {
+        payload.labels = taskData.labels;
+      }
+      
+      const response = await this.client.post('/tasks', payload);
+      
+      logger.info('Task created in Motion', { taskId: response.data.id });
+      return response.data;
+    } catch (error) {
+      logger.error('Error creating task in Motion', { error: error.message });
+      throw error;
+    }
+  }
+
+  async updateTask(taskId, taskData) {
+    try {
+      const response = await this.client.patch(`/tasks/${taskId}`, {
+        name: taskData.name,
+        description: taskData.description,
+        dueDate: taskData.dueDate,
+        priority: this.mapPriority(taskData.priority),
+        status: this.mapStatus(taskData.status),
+        labels: taskData.labels || []
+      });
+      
+      logger.info('Task updated in Motion', { taskId });
+      return response.data;
+    } catch (error) {
+      logger.error('Error updating task in Motion', { taskId, error: error.message });
+      throw error;
+    }
+  }
+
+  async getTask(taskId) {
+    try {
+      const response = await this.client.get(`/tasks/${taskId}`);
+      return response.data;
+    } catch (error) {
+      logger.error('Error fetching task from Motion', { taskId, error: error.message });
+      throw error;
+    }
+  }
+
+  async listTasks(params = {}) {
+    try {
+      const response = await this.client.get('/tasks', { params });
+      return response.data;
+    } catch (error) {
+      logger.error('Error listing tasks from Motion', { 
+        error: error.message,
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        url: error.config?.url,
+        baseURL: error.config?.baseURL,
+        fullURL: error.config?.baseURL + error.config?.url
+      });
+      throw error;
+    }
+  }
+
+  mapPriority(notionPriority) {
+    const priorityMap = {
+      'High': 'HIGH',
+      'Medium': 'MEDIUM',
+      'Low': 'LOW'
+    };
+    return priorityMap[notionPriority] || 'MEDIUM';
+  }
+
+  mapStatus(notionStatus) {
+    const statusMap = {
+      'Not started': 'Todo',
+      'In progress': 'In Progress',
+      'Done': 'Completed',
+      'Archived': 'Canceled'
+    };
+    return statusMap[notionStatus] || 'Todo';
+  }
+}
+
+module.exports = new MotionClient();
