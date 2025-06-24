@@ -164,38 +164,32 @@ class PollService {
   async checkForOrphanedMotionTasks(motionTasks) {
     try {
       const notionClient = require('./notionClient');
-      const mappingCache = require('./mappingCache');
       
-      // Get all Notion tasks with Motion IDs
+      // Get all Notion tasks
       const notionTasks = await notionClient.queryDatabase();
-      const notionMotionIds = new Set(
-        notionTasks
-          .filter(task => task.motionTaskId)
-          .map(task => task.motionTaskId)
-      );
       
-      // Find Motion tasks that don't have a corresponding Notion task
-      const orphanedTasks = motionTasks.filter(
-        motionTask => !notionMotionIds.has(motionTask.id)
-      );
+      // Create a map of Notion task names to their Motion IDs
+      const notionTaskMap = new Map();
+      for (const task of notionTasks) {
+        notionTaskMap.set(task.name, task.motionTaskId);
+      }
       
-      if (orphanedTasks.length > 0) {
-        logger.info(`Found ${orphanedTasks.length} orphaned Motion tasks (deleted from Notion)`);
+      // Check each Motion task
+      for (const motionTask of motionTasks) {
+        const notionMotionId = notionTaskMap.get(motionTask.name);
         
-        for (const orphan of orphanedTasks) {
+        if (!notionMotionId) {
+          // No Notion task with this name exists
+          logger.info(`Motion task "${motionTask.name}" has no corresponding Notion task - deleting from Motion`);
           try {
-            // Check if this Motion task was previously synced (exists in cache)
-            const notionId = mappingCache.getNotionId(orphan.id);
-            if (notionId) {
-              // This task was synced before, so its Notion counterpart was deleted
-              logger.info(`Deleting orphaned Motion task: ${orphan.name}`);
-              await motionClient.deleteTask(orphan.id);
-              mappingCache.removeByMotionId(orphan.id);
-            }
-            // If not in cache, it might be a Motion-native task, so don't delete
+            await motionClient.deleteTask(motionTask.id);
+            logger.info(`Deleted orphaned Motion task: ${motionTask.name}`);
           } catch (error) {
-            logger.error(`Failed to delete orphaned Motion task: ${orphan.name}`, { error: error.message });
+            logger.error(`Failed to delete orphaned Motion task: ${motionTask.name}`, { error: error.message });
           }
+        } else if (notionMotionId !== motionTask.id) {
+          // Notion task exists but points to a different Motion ID (shouldn't happen but handle it)
+          logger.warn(`Notion task "${motionTask.name}" has different Motion ID. Expected: ${notionMotionId}, Found: ${motionTask.id}`);
         }
       }
     } catch (error) {
