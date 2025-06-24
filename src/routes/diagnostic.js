@@ -61,15 +61,20 @@ router.get('/motion-sync-status', async (req, res) => {
       task => !notionMotionIds.has(task.id)
     );
     
+    // Find Raycast task to check duration
+    const raycastMotion = motionTasks.find(t => t.name === 'Raycast');
+    
     res.json({
       motionTaskCount: motionTasks.length,
       notionTasksWithMotionId: notionMotionIds.size,
       missingInNotion: missingSyncTasks.length,
       syncPercentage: Math.round((notionMotionIds.size / motionTasks.length) * 100),
+      raycastMotionDuration: raycastMotion ? raycastMotion.duration : 'Raycast not found',
       missingSample: missingSyncTasks.slice(0, 5).map(t => ({
         id: t.id,
         name: t.name,
-        status: t.status?.name || t.status
+        status: t.status?.name || t.status,
+        duration: t.duration
       }))
     });
   } catch (error) {
