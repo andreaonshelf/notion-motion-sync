@@ -92,4 +92,47 @@ router.get('/recent-webhooks', (req, res) => {
   });
 });
 
+router.get('/trial-tasks', async (req, res) => {
+  try {
+    // Get Motion tasks
+    const motionResponse = await motionClient.listTasks();
+    const motionTasks = motionResponse.tasks || [];
+    
+    // Get Notion tasks
+    const notionTasks = await notionClient.queryDatabase();
+    
+    // Find all "trial" tasks
+    const motionTrialTasks = motionTasks.filter(t => 
+      t.name.toLowerCase().includes('trial')
+    );
+    
+    const notionTrialTasks = notionTasks.filter(t => 
+      t.name.toLowerCase().includes('trial')
+    );
+    
+    res.json({
+      motion: {
+        count: motionTrialTasks.length,
+        tasks: motionTrialTasks.map(t => ({
+          id: t.id,
+          name: t.name,
+          status: t.status?.name || t.status
+        }))
+      },
+      notion: {
+        count: notionTrialTasks.length,
+        tasks: notionTrialTasks.map(t => ({
+          id: t.id,
+          name: t.name,
+          motionTaskId: t.motionTaskId,
+          status: t.status
+        }))
+      }
+    });
+  } catch (error) {
+    logger.error('Error in trial tasks diagnostic', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;

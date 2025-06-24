@@ -179,6 +179,7 @@ class PollService {
       logger.info(`Motion has ${motionTasks.length} total tasks`);
       
       // Check each Motion task
+      let deletedCount = 0;
       for (const motionTask of motionTasks) {
         if (!notionMotionIds.has(motionTask.id)) {
           // This Motion task has no corresponding Notion task
@@ -186,10 +187,17 @@ class PollService {
           try {
             await motionClient.deleteTask(motionTask.id);
             logger.info(`Deleted orphaned Motion task: ${motionTask.name}`);
+            deletedCount++;
+            // Rate limit deletions
+            await new Promise(resolve => setTimeout(resolve, 1000));
           } catch (error) {
             logger.error(`Failed to delete orphaned Motion task: ${motionTask.name}`, { error: error.message });
           }
         }
+      }
+      
+      if (deletedCount > 0) {
+        logger.info(`Deleted ${deletedCount} orphaned Motion tasks`);
       }
     } catch (error) {
       logger.error('Error checking for orphaned Motion tasks', { error: error.message });
