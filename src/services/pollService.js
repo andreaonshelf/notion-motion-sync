@@ -168,28 +168,27 @@ class PollService {
       // Get all Notion tasks
       const notionTasks = await notionClient.queryDatabase();
       
-      // Create a map of Notion task names to their Motion IDs
-      const notionTaskMap = new Map();
-      for (const task of notionTasks) {
-        notionTaskMap.set(task.name, task.motionTaskId);
-      }
+      // Create a set of all Motion IDs that exist in Notion
+      const notionMotionIds = new Set(
+        notionTasks
+          .filter(task => task.motionTaskId)
+          .map(task => task.motionTaskId)
+      );
+      
+      logger.info(`Notion has ${notionMotionIds.size} tasks with Motion IDs`);
+      logger.info(`Motion has ${motionTasks.length} total tasks`);
       
       // Check each Motion task
       for (const motionTask of motionTasks) {
-        const notionMotionId = notionTaskMap.get(motionTask.name);
-        
-        if (!notionMotionId) {
-          // No Notion task with this name exists
-          logger.info(`Motion task "${motionTask.name}" has no corresponding Notion task - deleting from Motion`);
+        if (!notionMotionIds.has(motionTask.id)) {
+          // This Motion task has no corresponding Notion task
+          logger.info(`Motion task "${motionTask.name}" (ID: ${motionTask.id}) has no corresponding Notion task - deleting from Motion`);
           try {
             await motionClient.deleteTask(motionTask.id);
             logger.info(`Deleted orphaned Motion task: ${motionTask.name}`);
           } catch (error) {
             logger.error(`Failed to delete orphaned Motion task: ${motionTask.name}`, { error: error.message });
           }
-        } else if (notionMotionId !== motionTask.id) {
-          // Notion task exists but points to a different Motion ID (shouldn't happen but handle it)
-          logger.warn(`Notion task "${motionTask.name}" has different Motion ID. Expected: ${notionMotionId}, Found: ${motionTask.id}`);
         }
       }
     } catch (error) {
