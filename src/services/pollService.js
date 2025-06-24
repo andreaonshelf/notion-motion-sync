@@ -32,13 +32,43 @@ class PollService {
 
   async pollForChanges() {
     try {
-      logger.info('Polling for Motion changes...');
+      logger.info('Polling for changes...');
       
-      // Only poll Motion since Notion has webhooks
+      // Poll Motion changes
       await this.pollMotionChanges();
+      
+      // ALSO check for any Notion tasks without Motion IDs
+      await this.syncUnsyncedNotionTasks();
       
     } catch (error) {
       logger.error('Error during polling', { error: error.message });
+    }
+  }
+  
+  async syncUnsyncedNotionTasks() {
+    try {
+      const notionClient = require('./notionClient');
+      const syncService = require('./syncService');
+      
+      const tasks = await notionClient.queryDatabase();
+      const unsyncedTasks = tasks.filter(task => !task.motionTaskId);
+      
+      if (unsyncedTasks.length > 0) {
+        logger.info(`Found ${unsyncedTasks.length} unsynced Notion tasks during poll`);
+        
+        for (const task of unsyncedTasks) {
+          try {
+            await syncService.syncNotionToMotion(task.id);
+            logger.info(`Synced previously unsynced task: ${task.name}`);
+            // Rate limit
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          } catch (error) {
+            logger.error(`Failed to sync unsynced task ${task.name}`, { error: error.message });
+          }
+        }
+      }
+    } catch (error) {
+      logger.error('Error checking for unsynced Notion tasks', { error: error.message });
     }
   }
 
@@ -120,11 +150,56 @@ class PollService {
         }
       }
       
+      // ALSO check for orphaned Motion tasks (exist in Motion but their Notion task was deleted)
+      await this.checkForOrphanedMotionTasks(motionTasks.tasks || []);
+      
       if (changedCount > 0 || deletedCount > 0) {
         logger.info(`Motion poll: ${changedCount} changed, ${deletedCount} deleted`);
       }
     } catch (error) {
       logger.error('Error polling Motion', { error: error.message });
+    }
+  }
+  
+  async checkForOrphanedMotionTasks(motionTasks) {
+    try {
+      const notionClient = require('./notionClient');
+      const mappingCache = require('./mappingCache');
+      
+      // Get all Notion tasks with Motion IDs
+      const notionTasks = await notionClient.queryDatabase();
+      const notionMotionIds = new Set(
+        notionTasks
+          .filter(task => task.motionTaskId)
+          .map(task => task.motionTaskId)
+      );
+      
+      // Find Motion tasks that don't have a corresponding Notion task
+      const orphanedTasks = motionTasks.filter(
+        motionTask => !notionMotionIds.has(motionTask.id)
+      );
+      
+      if (orphanedTasks.length > 0) {
+        logger.info(`Found ${orphanedTasks.length} orphaned Motion tasks (deleted from Notion)`);
+        
+        for (const orphan of orphanedTasks) {
+          try {
+            // Check if this Motion task was previously synced (exists in cache)
+            const notionId = mappingCache.getNotionId(orphan.id);
+            if (notionId) {
+              // This task was synced before, so its Notion counterpart was deleted
+              logger.info(`Deleting orphaned Motion task: ${orphan.name}`);
+              await motionClient.deleteTask(orphan.id);
+              mappingCache.removeByMotionId(orphan.id);
+            }
+            // If not in cache, it might be a Motion-native task, so don't delete
+          } catch (error) {
+            logger.error(`Failed to delete orphaned Motion task: ${orphan.name}`, { error: error.message });
+          }
+        }
+      }
+    } catch (error) {
+      logger.error('Error checking for orphaned Motion tasks', { error: error.message });
     }
   }
 
