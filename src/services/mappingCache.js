@@ -81,7 +81,14 @@ class MappingCache {
   async initialize(notionClient) {
     try {
       logger.info('Initializing mapping cache...');
-      const notionTasks = await notionClient.queryDatabase();
+      
+      // Add timeout to prevent hanging
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Cache initialization timeout')), 30000)
+      );
+      
+      const queryPromise = notionClient.queryDatabase();
+      const notionTasks = await Promise.race([queryPromise, timeoutPromise]);
       
       let count = 0;
       for (const task of notionTasks) {
@@ -97,6 +104,8 @@ class MappingCache {
       });
     } catch (error) {
       logger.error('Failed to initialize mapping cache', { error: error.message });
+      // Cache will work but without pre-loaded mappings
+      // New mappings will be added as tasks sync
     }
   }
 }

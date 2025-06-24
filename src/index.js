@@ -110,9 +110,13 @@ const start = async () => {
         motionSync: `/sync/motion/:taskId`
       });
       
-      // Initialize mapping cache
-      await mappingCache.initialize(notionClient);
-      logger.info('Mapping cache initialized');
+      // Initialize mapping cache in the background (non-blocking)
+      mappingCache.initialize(notionClient).then(() => {
+        logger.info('Mapping cache initialized successfully');
+      }).catch(error => {
+        logger.error('Failed to initialize mapping cache', { error: error.message });
+        // Service continues running even if cache initialization fails
+      });
       
       // Start polling for Motion changes only (since Motion doesn't have webhooks)
       pollService.start(1);
