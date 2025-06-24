@@ -91,8 +91,12 @@ class MotionClient {
       }
       
       // Only add duration if specified (in minutes)
-      if (taskData.duration && typeof taskData.duration === 'number') {
-        payload.duration = taskData.duration;
+      if (taskData.duration) {
+        // Ensure duration is a number, not a string
+        const durationValue = parseInt(taskData.duration);
+        if (!isNaN(durationValue) && durationValue > 0) {
+          payload.duration = durationValue;
+        }
       }
       
       // Only add labels if they exist and are not empty
@@ -129,8 +133,12 @@ class MotionClient {
       };
       
       // Only add duration if specified (in minutes)
-      if (taskData.duration && typeof taskData.duration === 'number') {
-        updatePayload.duration = taskData.duration;
+      if (taskData.duration) {
+        // Ensure duration is a number, not a string
+        const durationValue = parseInt(taskData.duration);
+        if (!isNaN(durationValue) && durationValue > 0) {
+          updatePayload.duration = durationValue;
+        }
       }
       
       logger.info('Updating Motion task', { 
