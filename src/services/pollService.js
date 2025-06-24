@@ -235,6 +235,8 @@ class PollService {
             const fullMotionTask = await motionClient.getTask(motionTask.id);
             motionDuration = fullMotionTask.duration;
             motionTask.duration = motionDuration; // Update for comparison
+            // Add small delay to avoid rate limits
+            await new Promise(resolve => setTimeout(resolve, 500));
           } catch (error) {
             logger.error('Failed to fetch full Motion task details', {
               taskId: motionTask.id,
