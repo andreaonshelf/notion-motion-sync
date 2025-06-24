@@ -26,7 +26,8 @@ class SyncService {
           description: enhancedDescription,
           status: notionTask.status,
           priority: notionTask.priority,
-          dueDate: notionTask.dueDate
+          dueDate: notionTask.dueDate,
+          duration: notionTask.duration
         });
         
         // Ensure mapping is cached
@@ -43,7 +44,8 @@ class SyncService {
           description: enhancedDescription,
           status: notionTask.status,
           priority: notionTask.priority,
-          dueDate: notionTask.dueDate
+          dueDate: notionTask.dueDate,
+          duration: notionTask.duration
         });
         
         await notionClient.updateTask(notionPageId, {
@@ -93,6 +95,7 @@ class SyncService {
         status: this.mapMotionStatusToNotion(motionTask.status?.name || motionTask.status),
         priority: this.mapMotionPriorityToNotion(motionTask.priority),
         dueDate: motionTask.dueDate,
+        duration: motionTask.duration || null,
         motionTaskId: motionTaskId
       };
       

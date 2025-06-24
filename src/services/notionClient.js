@@ -92,6 +92,7 @@ class NotionClient {
       status: properties.Status?.status?.name || 'Not started',
       priority: properties.Priority?.select?.name || 'Medium',
       dueDate: properties['Due date']?.date?.start || null,
+      duration: properties['Duration (minutes)']?.number || null,
       motionTaskId: properties['Motion Task ID']?.rich_text?.[0]?.plain_text || null,
       lastSynced: null,
       lastEdited: page.last_edited_time,
@@ -154,6 +155,12 @@ class NotionClient {
     if (taskData.motionTaskId !== undefined) {
       properties['Motion Task ID'] = {
         rich_text: [{ text: { content: taskData.motionTaskId } }]
+      };
+    }
+    
+    if (taskData.duration !== undefined) {
+      properties['Duration (minutes)'] = {
+        number: taskData.duration
       };
     }
     

@@ -90,6 +90,11 @@ class MotionClient {
         payload.priority = this.mapPriority(taskData.priority);
       }
       
+      // Only add duration if specified (in minutes)
+      if (taskData.duration && typeof taskData.duration === 'number') {
+        payload.duration = taskData.duration;
+      }
+      
       // Only add labels if they exist and are not empty
       if (taskData.labels && taskData.labels.length > 0) {
         payload.labels = taskData.labels;
@@ -114,14 +119,21 @@ class MotionClient {
 
   async updateTask(taskId, taskData) {
     try {
-      const response = await this.client.patch(`/tasks/${taskId}`, {
+      const updatePayload = {
         name: taskData.name,
         description: taskData.description,
         dueDate: taskData.dueDate,
         priority: this.mapPriority(taskData.priority),
         status: this.mapStatus(taskData.status),
         labels: taskData.labels || []
-      });
+      };
+      
+      // Only add duration if specified (in minutes)
+      if (taskData.duration && typeof taskData.duration === 'number') {
+        updatePayload.duration = taskData.duration;
+      }
+      
+      const response = await this.client.patch(`/tasks/${taskId}`, updatePayload);
       
       logger.info('Task updated in Motion', { taskId });
       return response.data;
