@@ -43,6 +43,11 @@ router.post('/notion', async (req, res) => {
       return;
     }
     
+    // WEBHOOKS DISABLED - Using polling instead
+    logger.info('Webhook received but ignored - using polling instead');
+    res.json({ success: true, message: 'Webhook acknowledged but not processed (polling mode)' });
+    return;
+    
     // Verify webhook signature for actual events
     if (config.webhook.secret && req.headers['x-webhook-signature']) {
       const signature = req.headers['x-webhook-signature'];
