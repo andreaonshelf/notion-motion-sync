@@ -119,6 +119,48 @@ router.get('/motion-task/:taskId', async (req, res) => {
   }
 });
 
+router.post('/force-sync-raycast', async (req, res) => {
+  try {
+    logger.info('FORCE SYNC: Starting Raycast sync');
+    
+    // Get Raycast from Notion
+    const notionTasks = await notionClient.queryDatabase();
+    const raycastNotion = notionTasks.find(t => t.name === 'Raycast');
+    
+    if (!raycastNotion) {
+      return res.status(404).json({ error: 'Raycast not found in Notion' });
+    }
+    
+    logger.info('FORCE SYNC: Found Raycast in Notion', {
+      id: raycastNotion.id,
+      motionTaskId: raycastNotion.motionTaskId,
+      duration: raycastNotion.duration
+    });
+    
+    // Sync it
+    await syncService.syncNotionToMotion(raycastNotion.id);
+    
+    // Check Motion after sync
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    const motionTask = await motionClient.getTask(raycastNotion.motionTaskId);
+    
+    res.json({
+      success: true,
+      notion: {
+        id: raycastNotion.id,
+        duration: raycastNotion.duration
+      },
+      motionAfterSync: {
+        id: motionTask.id,
+        duration: motionTask.duration
+      }
+    });
+  } catch (error) {
+    logger.error('FORCE SYNC: Error', { error: error.message, stack: error.stack });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.post('/test-duration-update/:taskId', async (req, res) => {
   try {
     const { taskId } = req.params;
