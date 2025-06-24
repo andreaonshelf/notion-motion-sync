@@ -4,13 +4,13 @@ const logger = require('../utils/logger');
 
 class MotionClient {
   constructor() {
-    // Get the API key
-    const apiKey = config.motion.apiKey;
+    // Store API key as instance property
+    this.apiKey = config.motion.apiKey;
     
     // Log API key details for debugging
     logger.info('Motion API key configured', { 
-      keyLength: apiKey ? apiKey.length : 0,
-      keyPreview: apiKey ? apiKey.substring(0, 10) + '...' : 'missing'
+      keyLength: this.apiKey ? this.apiKey.length : 0,
+      keyPreview: this.apiKey ? this.apiKey.substring(0, 10) + '...' : 'missing'
     });
     
     this.client = axios.create({
@@ -21,19 +21,21 @@ class MotionClient {
     });
     
     // Add request/response interceptors for debugging
-    this.client.interceptors.request.use((config) => {
-      // Set API key
-      config.headers['X-API-Key'] = apiKey;
+    this.client.interceptors.request.use((requestConfig) => {
+      // Set API key from instance property
+      requestConfig.headers['X-API-Key'] = this.apiKey;
       
       // Log outgoing request
       logger.info('Motion API request', {
-        method: config.method,
-        url: config.url,
-        baseURL: config.baseURL,
-        fullURL: config.baseURL + config.url
+        method: requestConfig.method,
+        url: requestConfig.url,
+        baseURL: requestConfig.baseURL,
+        fullURL: requestConfig.baseURL + requestConfig.url,
+        hasApiKey: !!requestConfig.headers['X-API-Key'],
+        apiKeyPreview: requestConfig.headers['X-API-Key'] ? requestConfig.headers['X-API-Key'].substring(0, 10) + '...' : 'missing'
       });
       
-      return config;
+      return requestConfig;
     }, (error) => {
       logger.error('Motion request error', { error: error.message });
       return Promise.reject(error);
