@@ -94,6 +94,26 @@ router.get('/recent-webhooks', (req, res) => {
   });
 });
 
+router.get('/motion-task/:taskId', async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const task = await motionClient.getTask(taskId);
+    res.json({
+      task: {
+        id: task.id,
+        name: task.name,
+        duration: task.duration,
+        status: task.status,
+        priority: task.priority,
+        description: task.description?.substring(0, 100)
+      }
+    });
+  } catch (error) {
+    logger.error('Error fetching Motion task', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.get('/trial-tasks', async (req, res) => {
   try {
     // Get Motion tasks
