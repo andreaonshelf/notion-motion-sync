@@ -51,16 +51,28 @@ app.get('/health', (req, res) => {
 });
 
 app.get('/debug-motion-key', (req, res) => {
-  const apiKey = process.env.MOTION_API_KEY;
+  const motionKey = process.env.MOTION_API_KEY;
+  const notionKey = process.env.NOTION_API_KEY;
   
   res.json({
-    hasKey: !!apiKey,
-    keyLength: apiKey ? apiKey.length : 0,
-    firstChar: apiKey ? apiKey.charCodeAt(0) : null,
-    lastChar: apiKey ? apiKey.charCodeAt(apiKey.length - 1) : null,
-    hasNewline: apiKey ? apiKey.includes('\n') : false,
-    hasCarriageReturn: apiKey ? apiKey.includes('\r') : false,
-    hasTab: apiKey ? apiKey.includes('\t') : false
+    motion: {
+      hasKey: !!motionKey,
+      keyLength: motionKey ? motionKey.length : 0,
+      preview: motionKey ? motionKey.substring(0, 10) + '...' : 'missing',
+      startsWithPK: motionKey ? motionKey.startsWith('PK') : false,
+      firstChars: motionKey ? motionKey.substring(0, 3) : 'N/A'
+    },
+    notion: {
+      hasKey: !!notionKey,
+      keyLength: notionKey ? notionKey.length : 0,
+      preview: notionKey ? notionKey.substring(0, 10) + '...' : 'missing',
+      startsWithNtn: notionKey ? notionKey.startsWith('ntn_') : false,
+      firstChars: notionKey ? notionKey.substring(0, 4) : 'N/A'
+    },
+    configValues: {
+      motionFromConfig: config.motion.apiKey ? config.motion.apiKey.substring(0, 10) + '...' : 'missing',
+      notionFromConfig: config.notion.apiKey ? config.notion.apiKey.substring(0, 10) + '...' : 'missing'
+    }
   });
 });
 
