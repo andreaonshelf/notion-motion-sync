@@ -25,14 +25,19 @@ class MotionClient {
       // Set API key from instance property
       requestConfig.headers['X-API-Key'] = this.apiKey;
       
-      // Log outgoing request
-      logger.info('Motion API request', {
+      // Debug: Log exact headers being sent
+      logger.info('Motion API request details', {
         method: requestConfig.method,
         url: requestConfig.url,
         baseURL: requestConfig.baseURL,
         fullURL: requestConfig.baseURL + requestConfig.url,
-        hasApiKey: !!requestConfig.headers['X-API-Key'],
-        apiKeyPreview: requestConfig.headers['X-API-Key'] ? requestConfig.headers['X-API-Key'].substring(0, 10) + '...' : 'missing'
+        headers: {
+          'X-API-Key': requestConfig.headers['X-API-Key'] ? requestConfig.headers['X-API-Key'].substring(0, 10) + '...' : 'MISSING',
+          'Content-Type': requestConfig.headers['Content-Type'],
+          allKeys: Object.keys(requestConfig.headers)
+        },
+        apiKeyFromThis: this.apiKey ? this.apiKey.substring(0, 10) + '...' : 'MISSING',
+        apiKeyLength: this.apiKey ? this.apiKey.length : 0
       });
       
       return requestConfig;
