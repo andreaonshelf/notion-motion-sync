@@ -127,7 +127,20 @@ class MotionClient {
 
   async listTasks(params = {}) {
     try {
+      // Add workspace filter if configured
+      if (config.motion.workspaceId) {
+        params.workspaceId = config.motion.workspaceId;
+      }
+      
+      logger.info('Fetching Motion tasks with params', { params });
+      
       const response = await this.client.get('/tasks', { params });
+      
+      logger.info('Motion tasks fetched', { 
+        count: response.data.tasks ? response.data.tasks.length : 0,
+        hasData: !!response.data
+      });
+      
       return response.data;
     } catch (error) {
       logger.error('Error listing tasks from Motion', { 
@@ -136,7 +149,8 @@ class MotionClient {
         statusText: error.response?.statusText,
         url: error.config?.url,
         baseURL: error.config?.baseURL,
-        fullURL: error.config?.baseURL + error.config?.url
+        fullURL: error.config?.baseURL + error.config?.url,
+        params
       });
       throw error;
     }

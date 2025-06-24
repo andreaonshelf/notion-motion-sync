@@ -91,6 +91,11 @@ class SyncService {
       
       if (notionTasks.length > 0) {
         const notionPageId = notionTasks[0].id;
+        logger.info('Found existing Notion task, updating...', {
+          motionTaskId,
+          notionPageId,
+          existingName: notionTasks[0].name
+        });
         await notionClient.updateTask(notionPageId, taskData);
         
         logger.info('Updated Notion task from Motion', { 
@@ -98,6 +103,10 @@ class SyncService {
           notionPageId 
         });
       } else {
+        logger.info('No existing Notion task found, creating new...', {
+          motionTaskId,
+          taskName: taskData.name
+        });
         const notionTask = await notionClient.createTask(taskData);
         
         logger.info('Created Notion task from Motion', { 

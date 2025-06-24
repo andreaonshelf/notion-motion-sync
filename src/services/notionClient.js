@@ -39,6 +39,12 @@ class NotionClient {
   async createTask(taskData) {
     try {
       const properties = this.buildProperties(taskData);
+      logger.info('Creating task in Notion with properties', {
+        taskData,
+        properties,
+        databaseId: this.databaseId
+      });
+      
       const response = await this.client.pages.create({
         parent: { database_id: this.databaseId },
         properties
@@ -47,7 +53,13 @@ class NotionClient {
       logger.info('Task created in Notion', { pageId: response.id });
       return this.parseTask(response);
     } catch (error) {
-      logger.error('Error creating task in Notion', { error: error.message });
+      logger.error('Error creating task in Notion', { 
+        error: error.message,
+        code: error.code,
+        body: error.body,
+        taskData,
+        databaseId: this.databaseId
+      });
       throw error;
     }
   }
