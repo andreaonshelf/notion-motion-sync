@@ -1,6 +1,7 @@
 const express = require('express');
 const notionClient = require('../services/notionClient');
 const motionClient = require('../services/motionClient');
+const mappingCache = require('../services/mappingCache');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -73,6 +74,14 @@ router.get('/motion-sync-status', async (req, res) => {
     logger.error('Error in sync status diagnostic', { error: error.message });
     res.status(500).json({ error: error.message });
   }
+});
+
+router.get('/cache-status', (req, res) => {
+  const stats = mappingCache.getStats();
+  res.json({
+    cacheStats: stats,
+    message: 'Cache is used to track Notion-Motion task mappings for deletion handling'
+  });
 });
 
 module.exports = router;

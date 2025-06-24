@@ -10,6 +10,8 @@ const testRoutes = require('./routes/test');
 const diagnosticRoutes = require('./routes/diagnostic');
 const debugRoutes = require('./routes/debug');
 const pollService = require('./services/pollService');
+const mappingCache = require('./services/mappingCache');
+const notionClient = require('./services/notionClient');
 
 const app = express();
 
@@ -107,6 +109,10 @@ const start = async () => {
         notionSync: `/sync/notion/:pageId`,
         motionSync: `/sync/motion/:taskId`
       });
+      
+      // Initialize mapping cache
+      await mappingCache.initialize(notionClient);
+      logger.info('Mapping cache initialized');
       
       // Start polling for Motion changes only (since Motion doesn't have webhooks)
       pollService.start(1);

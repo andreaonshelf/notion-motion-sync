@@ -1,5 +1,6 @@
 const motionClient = require('./motionClient');
 const notionClient = require('./notionClient');
+const mappingCache = require('./mappingCache');
 const logger = require('../utils/logger');
 
 class SyncService {
@@ -28,6 +29,9 @@ class SyncService {
           dueDate: notionTask.dueDate
         });
         
+        // Ensure mapping is cached
+        mappingCache.setMapping(notionPageId, notionTask.motionTaskId);
+        
         logger.info('Updated Motion task from Notion', { 
           notionPageId, 
           motionTaskId: motionTask.id 
@@ -45,6 +49,9 @@ class SyncService {
         await notionClient.updateTask(notionPageId, {
           motionTaskId: motionTask.id
         });
+        
+        // Cache the mapping
+        mappingCache.setMapping(notionPageId, motionTask.id);
         
         logger.info('Created Motion task from Notion', { 
           notionPageId, 
@@ -98,6 +105,9 @@ class SyncService {
         });
         await notionClient.updateTask(notionPageId, taskData);
         
+        // Ensure mapping is cached
+        mappingCache.setMapping(notionPageId, motionTaskId);
+        
         logger.info('Updated Notion task from Motion', { 
           motionTaskId, 
           notionPageId 
@@ -108,6 +118,9 @@ class SyncService {
           taskName: taskData.name
         });
         const notionTask = await notionClient.createTask(taskData);
+        
+        // Cache the new mapping
+        mappingCache.setMapping(notionTask.id, motionTaskId);
         
         logger.info('Created Notion task from Motion', { 
           motionTaskId, 
@@ -240,15 +253,27 @@ class SyncService {
     try {
       logger.info('Handling Notion page deletion', { notionPageId, motionTaskId });
       
+      // If Motion task ID not provided, try to get it from cache
+      if (!motionTaskId) {
+        motionTaskId = mappingCache.getMotionId(notionPageId);
+        if (motionTaskId) {
+          logger.info('Retrieved Motion task ID from cache', { notionPageId, motionTaskId });
+        }
+      }
+      
       if (motionTaskId) {
         // Delete the corresponding Motion task
         await motionClient.deleteTask(motionTaskId);
+        
+        // Remove from cache
+        mappingCache.removeByNotionId(notionPageId);
+        
         logger.info('Notion page deleted - Motion task also deleted', { 
           notionPageId, 
           motionTaskId 
         });
       } else {
-        logger.warn('Notion page deleted but no Motion task ID found', { notionPageId });
+        logger.warn('Notion page deleted but no Motion task ID found in webhook or cache', { notionPageId });
       }
     } catch (error) {
       logger.error('Error handling Notion deletion', { 
@@ -278,6 +303,9 @@ class SyncService {
         await notionClient.updateTask(notionPageId, {
           status: 'Archived'
         });
+        
+        // Remove from cache since Motion task no longer exists
+        mappingCache.removeByMotionId(motionTaskId);
         
         logger.info('Motion task deleted - Notion task archived', { 
           motionTaskId, 
