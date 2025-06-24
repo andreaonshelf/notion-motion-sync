@@ -34,10 +34,14 @@ class PollService {
     try {
       logger.info('Polling for changes...');
       
-      // Poll Motion changes
+      // FIRST: Clean up any orphaned Motion tasks (deleted from Notion)
+      const motionResponse = await motionClient.listTasks();
+      await this.checkForOrphanedMotionTasks(motionResponse.tasks || []);
+      
+      // THEN: Poll Motion changes (but don't create in Notion)
       await this.pollMotionChanges();
       
-      // ALSO check for any Notion tasks without Motion IDs
+      // FINALLY: Check for any Notion tasks without Motion IDs
       await this.syncUnsyncedNotionTasks();
       
     } catch (error) {
@@ -120,23 +124,11 @@ class PollService {
         const lastChecksum = this.motionTaskChecksums.get(task.id);
         
         if (isFirstRun || lastChecksum !== checksum) {
-          try {
-            logger.info(`Detected Motion ${isFirstRun ? 'task' : 'change'}: ${task.name}`);
-            await syncService.syncMotionToNotion(task.id);
-            this.motionTaskChecksums.set(task.id, checksum);
-            changedCount++;
-            
-            // Add longer delay to avoid rate limits (Motion allows ~1 request per second)
-            await new Promise(resolve => setTimeout(resolve, 1000));
-          } catch (error) {
-            logger.error(`Failed to sync Motion task: ${task.name}`, { error: error.message });
-            
-            // If rate limited, wait much longer and continue
-            if (error.message.includes('429') || error.message.includes('Rate limit')) {
-              logger.info('Rate limited, waiting 10 seconds...');
-              await new Promise(resolve => setTimeout(resolve, 10000));
-            }
-          }
+          // Only sync if this task already exists in Notion
+          // Don't create new Notion tasks from Motion
+          logger.info(`Detected Motion ${isFirstRun ? 'task' : 'change'}: ${task.name}`);
+          this.motionTaskChecksums.set(task.id, checksum);
+          changedCount++;
         }
       }
       
@@ -150,8 +142,7 @@ class PollService {
         }
       }
       
-      // ALSO check for orphaned Motion tasks (exist in Motion but their Notion task was deleted)
-      await this.checkForOrphanedMotionTasks(motionTasks.tasks || []);
+      // Don't need this here anymore - it's called at the beginning of pollForChanges
       
       if (changedCount > 0 || deletedCount > 0) {
         logger.info(`Motion poll: ${changedCount} changed, ${deletedCount} deleted`);

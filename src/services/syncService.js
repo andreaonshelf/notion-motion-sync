@@ -113,19 +113,12 @@ class SyncService {
           notionPageId 
         });
       } else {
-        logger.info('No existing Notion task found, creating new...', {
+        // Don't create in Notion - this Motion task has no Notion counterpart
+        logger.info('Motion task has no Notion counterpart - will be deleted in next poll cycle', {
           motionTaskId,
           taskName: taskData.name
         });
-        const notionTask = await notionClient.createTask(taskData);
-        
-        // Cache the new mapping
-        mappingCache.setMapping(notionTask.id, motionTaskId);
-        
-        logger.info('Created Notion task from Motion', { 
-          motionTaskId, 
-          notionPageId: notionTask.id 
-        });
+        // Do NOT create in Notion - let the deletion logic handle it
       }
     } catch (error) {
       logger.error('Error syncing Motion to Notion', { 
