@@ -91,7 +91,12 @@ class MotionClient {
       logger.info('Task created in Motion', { taskId: response.data.id });
       return response.data;
     } catch (error) {
-      logger.error('Error creating task in Motion', { error: error.message });
+      logger.error('Error creating task in Motion', { 
+        error: error.message,
+        status: error.response?.status,
+        data: error.response?.data,
+        payload: payload
+      });
       throw error;
     }
   }
