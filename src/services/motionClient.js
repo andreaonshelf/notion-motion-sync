@@ -69,7 +69,6 @@ class MotionClient {
         name: taskData.name,
         description: taskData.description,
         dueDate: taskData.dueDate,
-        deadlineType: taskData.dueDate ? 'HARD' : 'NONE',
         duration: 30, // Default 30 minutes for auto-scheduling
         priority: this.mapPriority(taskData.priority),
         status: this.mapStatus(taskData.status),
