@@ -182,18 +182,18 @@ class SyncService {
         try {
           await this.syncMotionToNotion(task.id);
           successCount++;
-          // Add delay to avoid rate limits (Motion allows ~10 requests per second)
-          await new Promise(resolve => setTimeout(resolve, 150));
+          // Add delay to avoid rate limits (Motion allows ~1 request per second)
+          await new Promise(resolve => setTimeout(resolve, 1000));
         } catch (error) {
           logger.error('Failed to sync Motion task', { 
             taskName: task.name, 
             error: error.message 
           });
           errorCount++;
-          // If rate limited, wait longer
+          // If rate limited, wait much longer
           if (error.message.includes('429') || error.message.includes('Rate limit')) {
-            logger.info('Rate limited, waiting 2 seconds...');
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            logger.info('Rate limited, waiting 10 seconds...');
+            await new Promise(resolve => setTimeout(resolve, 10000));
           }
         }
       }

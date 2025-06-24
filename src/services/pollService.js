@@ -96,15 +96,15 @@ class PollService {
             this.motionTaskChecksums.set(task.id, checksum);
             changedCount++;
             
-            // Add delay to avoid rate limits
-            await new Promise(resolve => setTimeout(resolve, 150));
+            // Add longer delay to avoid rate limits (Motion allows ~1 request per second)
+            await new Promise(resolve => setTimeout(resolve, 1000));
           } catch (error) {
             logger.error(`Failed to sync Motion task: ${task.name}`, { error: error.message });
             
-            // If rate limited, wait longer and continue
+            // If rate limited, wait much longer and continue
             if (error.message.includes('429') || error.message.includes('Rate limit')) {
-              logger.info('Rate limited, waiting 2 seconds...');
-              await new Promise(resolve => setTimeout(resolve, 2000));
+              logger.info('Rate limited, waiting 10 seconds...');
+              await new Promise(resolve => setTimeout(resolve, 10000));
             }
           }
         }
