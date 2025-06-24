@@ -84,4 +84,12 @@ router.get('/cache-status', (req, res) => {
   });
 });
 
+router.get('/recent-webhooks', (req, res) => {
+  const webhookLog = require('../services/webhookLog');
+  res.json({
+    recentWebhooks: webhookLog.getRecent(20),
+    message: 'Recent webhook events'
+  });
+});
+
 module.exports = router;

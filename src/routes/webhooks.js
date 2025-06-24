@@ -2,6 +2,7 @@ const express = require('express');
 const crypto = require('crypto');
 const { config } = require('../config');
 const syncService = require('../services/syncService');
+const webhookLog = require('../services/webhookLog');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -63,6 +64,9 @@ router.post('/notion', async (req, res) => {
       fullEvent: JSON.stringify(event).substring(0, 200)
     });
     
+    // Log webhook for tracking
+    webhookLog.logWebhook('notion', event);
+    
     // Extract page ID from various possible locations
     const pageId = event.page?.id || event.data?.object?.id || event.id;
     
@@ -74,10 +78,21 @@ router.post('/notion', async (req, res) => {
     // Handle different Notion event types
     if (event.type === 'page.content_updated' || event.type === 'page.property_values_updated') {
       await syncService.syncNotionToMotion(pageId);
+      webhookLog.logWebhook('notion', event, 'synced');
       res.json({ success: true, message: 'Sync initiated' });
     } else if (event.type === 'page.created') {
-      await syncService.syncNotionToMotion(pageId);
-      res.json({ success: true, message: 'New page sync initiated' });
+      // Add a small delay for page.created to ensure Notion has fully saved the page
+      setTimeout(async () => {
+        try {
+          await syncService.syncNotionToMotion(pageId);
+          webhookLog.logWebhook('notion', event, 'synced');
+          logger.info('New page synced after delay', { pageId });
+        } catch (error) {
+          logger.error('Failed to sync new page after delay', { pageId, error: error.message });
+          webhookLog.logWebhook('notion', event, 'failed: ' + error.message);
+        }
+      }, 2000); // 2 second delay
+      res.json({ success: true, message: 'New page sync scheduled' });
     } else if (event.type === 'page.deleted') {
       // Try to extract Motion task ID from the event data
       // Note: This might not be available if Notion doesn't send page properties on deletion

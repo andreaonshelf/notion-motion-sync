@@ -95,7 +95,11 @@ class MotionClient {
         error: error.message,
         status: error.response?.status,
         data: error.response?.data,
-        payload: payload
+        sentData: {
+          name: taskData.name,
+          workspaceId: config.motion.workspaceId,
+          status: this.mapStatus(taskData.status)
+        }
       });
       throw error;
     }
