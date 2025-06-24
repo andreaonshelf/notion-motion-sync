@@ -1,5 +1,6 @@
 const express = require('express');
 const syncService = require('../services/syncService');
+const pollService = require('../services/pollService');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -48,6 +49,28 @@ router.post('/motion/:taskId', async (req, res) => {
     logger.error('Error during manual Motion sync', { error: error.message });
     res.status(500).json({ error: 'Sync failed', details: error.message });
   }
+});
+
+// Manually trigger Motion poll
+router.post('/poll-motion', async (req, res) => {
+  try {
+    logger.info('Manually triggering Motion poll');
+    await pollService.pollMotionChanges();
+    res.json({ success: true, message: 'Motion poll completed' });
+  } catch (error) {
+    logger.error('Motion poll error', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Check poll service status
+router.get('/poll-status', (req, res) => {
+  const isRunning = pollService.pollInterval !== null;
+  res.json({
+    pollServiceRunning: isRunning,
+    lastSyncCount: pollService.lastSyncTimes.size,
+    checksumCount: pollService.motionTaskChecksums.size
+  });
 });
 
 module.exports = router;
