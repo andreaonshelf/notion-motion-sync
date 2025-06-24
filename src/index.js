@@ -8,6 +8,7 @@ const webhookRoutes = require('./routes/webhooks');
 const syncRoutes = require('./routes/sync');
 const testRoutes = require('./routes/test');
 const diagnosticRoutes = require('./routes/diagnostic');
+const debugRoutes = require('./routes/debug');
 const pollService = require('./services/pollService');
 
 const app = express();
@@ -82,6 +83,7 @@ app.use('/webhooks', webhookRoutes);
 app.use('/sync', syncRoutes);
 app.use('/test', testRoutes);
 app.use('/diagnostic', diagnosticRoutes);
+app.use('/debug', debugRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ error: 'Not found' });
