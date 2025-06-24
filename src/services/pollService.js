@@ -41,6 +41,9 @@ class PollService {
       // THEN: Poll Motion changes (but don't create in Notion)
       await this.pollMotionChanges();
       
+      // THEN: Check for field changes in existing synced tasks
+      await this.checkForFieldChanges();
+      
       // FINALLY: Check for any Notion tasks without Motion IDs
       await this.syncUnsyncedNotionTasks();
       
@@ -193,6 +196,94 @@ class PollService {
     } catch (error) {
       logger.error('Error checking for orphaned Motion tasks', { error: error.message });
     }
+  }
+
+  async checkForFieldChanges() {
+    try {
+      logger.info('Checking for field changes in synced tasks...');
+      
+      // Get all Notion tasks that have Motion IDs
+      const notionTasks = await notionClient.queryDatabase();
+      const syncedTasks = notionTasks.filter(task => task.motionTaskId);
+      
+      // Get all Motion tasks
+      const motionResponse = await motionClient.listTasks();
+      const motionTasksMap = new Map();
+      for (const task of motionResponse.tasks || []) {
+        motionTasksMap.set(task.id, task);
+      }
+      
+      let updatedCount = 0;
+      
+      // Check each synced task for differences
+      for (const notionTask of syncedTasks) {
+        const motionTask = motionTasksMap.get(notionTask.motionTaskId);
+        
+        if (!motionTask) {
+          logger.warn('Motion task not found for synced Notion task', {
+            notionTaskId: notionTask.id,
+            motionTaskId: notionTask.motionTaskId
+          });
+          continue;
+        }
+        
+        // Check if any fields need updating
+        const needsUpdate = 
+          notionTask.name !== motionTask.name ||
+          notionTask.description !== (motionTask.description || '') ||
+          notionTask.status !== this.mapMotionStatusToNotion(motionTask.status?.name || motionTask.status) ||
+          notionTask.priority !== this.mapMotionPriorityToNotion(motionTask.priority) ||
+          notionTask.dueDate !== motionTask.dueDate ||
+          notionTask.duration !== (motionTask.duration || null);
+        
+        if (needsUpdate) {
+          logger.info('Field change detected, syncing Notion to Motion', {
+            taskName: notionTask.name,
+            notionDuration: notionTask.duration,
+            motionDuration: motionTask.duration
+          });
+          
+          try {
+            await syncService.syncNotionToMotion(notionTask.id);
+            updatedCount++;
+            // Rate limit
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          } catch (error) {
+            logger.error('Failed to sync field changes', {
+              taskName: notionTask.name,
+              error: error.message
+            });
+          }
+        }
+      }
+      
+      if (updatedCount > 0) {
+        logger.info(`Updated ${updatedCount} tasks with field changes`);
+      }
+    } catch (error) {
+      logger.error('Error checking for field changes', { error: error.message });
+    }
+  }
+  
+  mapMotionStatusToNotion(motionStatus) {
+    const statusMap = {
+      'Todo': 'Not started',
+      'In Progress': 'In progress',
+      'Completed': 'Done',
+      'Canceled': 'Archived',
+      'Backlog': 'Not started',
+      'Blocked': 'In progress'
+    };
+    return statusMap[motionStatus] || 'Not started';
+  }
+  
+  mapMotionPriorityToNotion(motionPriority) {
+    const priorityMap = {
+      'HIGH': 'High',
+      'MEDIUM': 'Medium',
+      'LOW': 'Low'
+    };
+    return priorityMap[motionPriority] || 'Medium';
   }
 
   generateChecksum(task) {
