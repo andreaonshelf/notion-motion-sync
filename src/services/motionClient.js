@@ -133,6 +133,13 @@ class MotionClient {
         updatePayload.duration = taskData.duration;
       }
       
+      logger.info('Updating Motion task', { 
+        taskId, 
+        payload: updatePayload,
+        hasDuration: 'duration' in updatePayload,
+        durationValue: updatePayload.duration
+      });
+      
       const response = await this.client.patch(`/tasks/${taskId}`, updatePayload);
       
       logger.info('Task updated in Motion', { taskId });

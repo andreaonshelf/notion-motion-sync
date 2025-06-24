@@ -119,6 +119,33 @@ router.get('/motion-task/:taskId', async (req, res) => {
   }
 });
 
+router.post('/test-duration-update/:taskId', async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const duration = 90;
+    
+    logger.info('TEST: Updating duration directly', { taskId, duration });
+    
+    const result = await motionClient.updateTask(taskId, {
+      duration: duration
+    });
+    
+    res.json({
+      success: true,
+      taskId,
+      duration,
+      result: {
+        id: result.id,
+        name: result.name,
+        duration: result.duration
+      }
+    });
+  } catch (error) {
+    logger.error('TEST: Error updating duration', { error: error.message, stack: error.stack });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.get('/trial-tasks', async (req, res) => {
   try {
     // Get Motion tasks
