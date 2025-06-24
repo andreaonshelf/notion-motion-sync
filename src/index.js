@@ -7,6 +7,7 @@ const errorHandler = require('./utils/errorHandler');
 const webhookRoutes = require('./routes/webhooks');
 const syncRoutes = require('./routes/sync');
 const testRoutes = require('./routes/test');
+const diagnosticRoutes = require('./routes/diagnostic');
 const pollService = require('./services/pollService');
 
 const app = express();
@@ -80,6 +81,7 @@ app.get('/debug-motion-key', (req, res) => {
 app.use('/webhooks', webhookRoutes);
 app.use('/sync', syncRoutes);
 app.use('/test', testRoutes);
+app.use('/diagnostic', diagnosticRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ error: 'Not found' });
