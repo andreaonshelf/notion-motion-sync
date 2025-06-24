@@ -227,6 +227,17 @@ class PollService {
           continue;
         }
         
+        // Log comparison for Raycast task
+        if (notionTask.name === 'Raycast') {
+          logger.info('DEBUG: Raycast task comparison', {
+            notionDuration: notionTask.duration,
+            motionDuration: motionTask.duration,
+            durationsMatch: notionTask.duration === motionTask.duration,
+            notionStatus: notionTask.status,
+            motionStatus: this.mapMotionStatusToNotion(motionTask.status?.name || motionTask.status)
+          });
+        }
+        
         // Check if any fields need updating
         const needsUpdate = 
           notionTask.name !== motionTask.name ||
@@ -234,7 +245,7 @@ class PollService {
           notionTask.status !== this.mapMotionStatusToNotion(motionTask.status?.name || motionTask.status) ||
           notionTask.priority !== this.mapMotionPriorityToNotion(motionTask.priority) ||
           notionTask.dueDate !== motionTask.dueDate ||
-          notionTask.duration !== (motionTask.duration || null);
+          notionTask.duration !== motionTask.duration;
         
         if (needsUpdate) {
           logger.info('Field change detected, syncing Notion to Motion', {
