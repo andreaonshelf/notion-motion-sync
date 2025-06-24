@@ -64,25 +64,38 @@ class MotionClient {
 
   async createTask(taskData) {
     try {
+      // Start with minimal required fields
       const payload = {
-        workspaceId: config.motion.workspaceId,
         name: taskData.name,
-        description: taskData.description,
-        dueDate: taskData.dueDate,
-        duration: 30, // Default 30 minutes for auto-scheduling
-        priority: this.mapPriority(taskData.priority),
-        status: this.mapStatus(taskData.status),
-        // Enable auto-scheduling and make it schedulable
-        autoScheduled: {
-          startDate: new Date().toISOString().split('T')[0], // Today
-          deadlineType: taskData.dueDate ? 'HARD' : 'SOFT'
-        }
+        workspaceId: config.motion.workspaceId
       };
+      
+      // Only add optional fields if they have values
+      if (taskData.description) {
+        payload.description = taskData.description;
+      }
+      
+      if (taskData.dueDate) {
+        payload.dueDate = taskData.dueDate;
+      }
+      
+      // Only add status if it's not the default
+      const mappedStatus = this.mapStatus(taskData.status);
+      if (mappedStatus !== 'Todo') {
+        payload.status = mappedStatus;
+      }
+      
+      // Only add priority if specified
+      if (taskData.priority) {
+        payload.priority = this.mapPriority(taskData.priority);
+      }
       
       // Only add labels if they exist and are not empty
       if (taskData.labels && taskData.labels.length > 0) {
         payload.labels = taskData.labels;
       }
+      
+      logger.info('Creating Motion task with payload', { payload });
       
       const response = await this.client.post('/tasks', payload);
       
@@ -93,11 +106,7 @@ class MotionClient {
         error: error.message,
         status: error.response?.status,
         data: error.response?.data,
-        sentData: {
-          name: taskData.name,
-          workspaceId: config.motion.workspaceId,
-          status: this.mapStatus(taskData.status)
-        }
+        payload: payload
       });
       throw error;
     }
