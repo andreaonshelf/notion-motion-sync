@@ -85,6 +85,16 @@ class NotionClient {
 
   parseTask(page) {
     const properties = page.properties;
+    
+    // Debug log for Raycast task
+    if (properties.Name?.title?.[0]?.plain_text === 'Raycast') {
+      logger.info('DEBUG: Raycast task properties', {
+        allPropertyKeys: Object.keys(properties),
+        durationProperty: properties['Duration (minutes)'],
+        durationValue: properties['Duration (minutes)']?.number
+      });
+    }
+    
     return {
       id: page.id,
       name: properties.Name?.title?.[0]?.plain_text || '',
