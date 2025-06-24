@@ -27,6 +27,7 @@ router.get('/notion-tasks', async (req, res) => {
         motionTaskId: t.motionTaskId,
         status: t.status,
         duration: t.duration,
+        dueDate: t.dueDate,
         lastEdited: t.lastEdited
       })),
       recentTasks: notionTasks.slice(0, 5).map(t => ({
