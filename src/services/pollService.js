@@ -301,7 +301,7 @@ class PollService {
       'Completed': 'Done',
       'Canceled': 'Archived',
       'Backlog': 'Not started',
-      'Blocked': 'In progress'
+      'Blocked': 'Not started'
     };
     return statusMap[motionStatus] || 'Not started';
   }
