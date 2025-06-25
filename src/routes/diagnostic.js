@@ -379,16 +379,32 @@ router.get('/database-errors', async (req, res) => {
 router.get('/test-motion-pagination', async (req, res) => {
   try {
     logger.info('Testing Motion pagination...');
-    const response = await motionClient.client.get('/tasks', { 
+    
+    // Test WITH workspace filter
+    const withWorkspace = await motionClient.client.get('/tasks', { 
       params: { workspaceId: require('../config').config.motion.workspaceId } 
     });
     
+    // Test WITHOUT workspace filter
+    const withoutWorkspace = await motionClient.client.get('/tasks', { 
+      params: {} 
+    });
+    
+    // Check if Stress Test is in either list
+    const stressTestInFiltered = withWorkspace.data.tasks?.some(t => t.name === 'Stress Test Assumptions');
+    const stressTestInAll = withoutWorkspace.data.tasks?.some(t => t.name === 'Stress Test Assumptions');
+    
     res.json({
-      taskCount: response.data.tasks?.length || 0,
-      hasCursor: !!response.data.cursor,
-      cursor: response.data.cursor,
-      firstTask: response.data.tasks?.[0]?.name,
-      lastTask: response.data.tasks?.[response.data.tasks?.length - 1]?.name
+      withWorkspaceFilter: {
+        taskCount: withWorkspace.data.tasks?.length || 0,
+        hasCursor: !!withWorkspace.data.cursor,
+        hasStressTest: stressTestInFiltered
+      },
+      withoutWorkspaceFilter: {
+        taskCount: withoutWorkspace.data.tasks?.length || 0,
+        hasCursor: !!withoutWorkspace.data.cursor,
+        hasStressTest: stressTestInAll
+      }
     });
   } catch (error) {
     logger.error('Motion pagination test failed', { error: error.message });
