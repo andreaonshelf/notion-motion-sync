@@ -177,14 +177,43 @@ class MotionClient {
       
       logger.info('Fetching Motion tasks with params', { params });
       
-      const response = await this.client.get('/tasks', { params });
+      let allTasks = [];
+      let cursor = null;
+      let pageCount = 0;
       
-      logger.info('Motion tasks fetched', { 
-        count: response.data.tasks ? response.data.tasks.length : 0,
-        hasData: !!response.data
+      // Paginate through all results
+      do {
+        const pageParams = { ...params };
+        if (cursor) {
+          pageParams.cursor = cursor;
+        }
+        
+        const response = await this.client.get('/tasks', { params: pageParams });
+        
+        if (response.data.tasks && response.data.tasks.length > 0) {
+          allTasks = allTasks.concat(response.data.tasks);
+          pageCount++;
+          logger.info(`Fetched page ${pageCount}`, { 
+            tasksInPage: response.data.tasks.length,
+            totalSoFar: allTasks.length,
+            hasCursor: !!response.data.cursor
+          });
+        }
+        
+        cursor = response.data.cursor || null;
+        
+        // Add small delay between pages to avoid rate limiting
+        if (cursor) {
+          await new Promise(resolve => setTimeout(resolve, 200));
+        }
+      } while (cursor);
+      
+      logger.info('All Motion tasks fetched', { 
+        totalTasks: allTasks.length,
+        pagesRetrieved: pageCount
       });
       
-      return response.data;
+      return { tasks: allTasks };
     } catch (error) {
       logger.error('Error listing tasks from Motion', { 
         error: error.message,
