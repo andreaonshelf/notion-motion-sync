@@ -67,6 +67,9 @@ class PollService {
       // Step 2: Process Motion operations (rate-limited)
       await this.processMotionOperations();
       
+      // Step 3: Clean up orphaned Motion tasks
+      await this.cleanupOrphanedMotionTasks();
+      
       logger.info('=== SLOW SYNC END ===');
     } catch (error) {
       logger.error('Error during slow sync', { error: error.message, stack: error.stack });
@@ -320,6 +323,83 @@ class PollService {
     } else {
       // No operation needed
       await database.completeMotionSync(task.notion_page_id, task.motion_task_id);
+    }
+  }
+
+  // Clean up orphaned Motion tasks
+  async cleanupOrphanedMotionTasks() {
+    try {
+      logger.info('Cleaning up orphaned Motion tasks...');
+      
+      // Get all Motion tasks
+      const motionResponse = await motionClient.listTasks();
+      const motionTasks = motionResponse.tasks || [];
+      
+      if (motionTasks.length === 0) {
+        logger.info('No Motion tasks found, skipping cleanup');
+        return;
+      }
+      
+      // Get all scheduled tasks from database (schedule_checkbox = true)
+      const scheduledTasks = await database.all(
+        'SELECT motion_task_id FROM sync_tasks WHERE schedule_checkbox = true AND motion_task_id IS NOT NULL'
+      );
+      const validMotionIds = new Set(scheduledTasks.map(t => t.motion_task_id));
+      
+      // Find orphaned Motion tasks (exist in Motion but not in our scheduled tasks)
+      const orphanedTasks = motionTasks.filter(task => !validMotionIds.has(task.id));
+      
+      // Apply 2-minute safety buffer - only delete tasks older than 2 minutes
+      const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
+      const safeOrphans = orphanedTasks.filter(task => {
+        const taskTime = new Date(task.createdTime || task.updatedTime);
+        return taskTime < twoMinutesAgo;
+      });
+      
+      if (safeOrphans.length === 0) {
+        logger.info(`Found ${orphanedTasks.length} orphaned tasks, but none older than 2 minutes`);
+        return;
+      }
+      
+      logger.info(`Cleaning up ${safeOrphans.length} orphaned Motion tasks (older than 2 minutes)`);
+      
+      for (const orphan of safeOrphans) {
+        try {
+          const age = Math.round((Date.now() - new Date(orphan.createdTime).getTime()) / 60000);
+          logger.info(`Deleting orphaned Motion task: ${orphan.name}`, {
+            id: orphan.id,
+            age: `${age} minutes`
+          });
+          
+          // Delete from Motion
+          await motionClient.deleteTask(orphan.id);
+          
+          // Clear from database if it exists there (shouldn't, but safety)
+          await database.pool.query(
+            'UPDATE sync_tasks SET motion_task_id = NULL, notion_sync_needed = true WHERE motion_task_id = $1',
+            [orphan.id]
+          );
+          
+          // Log cleanup
+          await database.logSync(null, orphan.id, 'orphan_cleanup', {
+            name: orphan.name,
+            age: `${age} minutes`
+          });
+          
+          // Rate limit between deletions
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+        } catch (error) {
+          logger.error(`Failed to delete orphaned Motion task: ${orphan.name}`, {
+            error: error.message
+          });
+        }
+      }
+      
+      logger.info(`Cleanup completed: deleted ${safeOrphans.length} orphaned Motion tasks`);
+      
+    } catch (error) {
+      logger.error('Error during Motion cleanup', { error: error.message });
     }
   }
   
