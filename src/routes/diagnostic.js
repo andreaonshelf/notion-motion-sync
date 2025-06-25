@@ -875,4 +875,128 @@ router.get('/check-phantom/:motionId', async (req, res) => {
   }
 });
 
+router.get('/scheduled-tasks-state', async (req, res) => {
+  try {
+    logger.info('Checking scheduled tasks state...');
+    
+    // Get all scheduled tasks from database with their sync state
+    const scheduledTasks = await database.all(`
+      SELECT 
+        notion_page_id,
+        notion_name,
+        motion_task_id,
+        motion_sync_needed,
+        motion_last_attempt,
+        motion_priority,
+        sync_status,
+        error_message,
+        error_count,
+        schedule_checkbox,
+        notion_duration,
+        notion_due_date,
+        notion_last_edited,
+        motion_last_synced,
+        updated_at
+      FROM sync_tasks
+      WHERE schedule_checkbox = true
+      ORDER BY motion_priority DESC, notion_last_edited DESC
+    `);
+    
+    // Get tasks that should be processed by slow sync
+    const tasksForSlowSync = await database.all(`
+      SELECT * FROM sync_tasks
+      WHERE motion_sync_needed = true
+        AND (motion_last_attempt IS NULL OR motion_last_attempt < NOW() - INTERVAL '5 minutes')
+        AND sync_status != 'syncing'
+      ORDER BY motion_priority DESC, notion_last_edited DESC
+      LIMIT 10
+    `);
+    
+    // Get phantom IDs (Motion IDs that don't exist)
+    const phantomIdTasks = await database.all(`
+      SELECT * FROM sync_tasks
+      WHERE motion_task_id IS NOT NULL
+        AND sync_status = 'error'
+        AND error_message LIKE '%404%'
+    `);
+    
+    // Categorize scheduled tasks
+    const categorized = {
+      readyToSync: scheduledTasks.filter(t => 
+        t.motion_sync_needed && 
+        (!t.motion_last_attempt || new Date(t.motion_last_attempt) < new Date(Date.now() - 5 * 60 * 1000)) &&
+        t.sync_status !== 'syncing'
+      ),
+      currentlySyncing: scheduledTasks.filter(t => t.sync_status === 'syncing'),
+      recentlyAttempted: scheduledTasks.filter(t => 
+        t.motion_last_attempt && 
+        new Date(t.motion_last_attempt) > new Date(Date.now() - 5 * 60 * 1000)
+      ),
+      withPhantomIds: scheduledTasks.filter(t => 
+        t.motion_task_id && 
+        t.sync_status === 'error' && 
+        t.error_message && 
+        t.error_message.includes('404')
+      ),
+      synced: scheduledTasks.filter(t => t.sync_status === 'synced' && !t.motion_sync_needed)
+    };
+    
+    res.json({
+      totalScheduledTasks: scheduledTasks.length,
+      tasksForSlowSyncCount: tasksForSlowSync.length,
+      phantomIdsCount: phantomIdTasks.length,
+      breakdown: {
+        readyToSync: {
+          count: categorized.readyToSync.length,
+          tasks: categorized.readyToSync.map(t => ({
+            name: t.notion_name,
+            motionId: t.motion_task_id,
+            lastAttempt: t.motion_last_attempt,
+            priority: t.motion_priority,
+            syncStatus: t.sync_status
+          }))
+        },
+        currentlySyncing: {
+          count: categorized.currentlySyncing.length,
+          tasks: categorized.currentlySyncing.map(t => ({
+            name: t.notion_name,
+            startedAt: t.updated_at
+          }))
+        },
+        recentlyAttempted: {
+          count: categorized.recentlyAttempted.length,
+          tasks: categorized.recentlyAttempted.map(t => ({
+            name: t.notion_name,
+            lastAttempt: t.motion_last_attempt,
+            syncStatus: t.sync_status,
+            error: t.error_message
+          }))
+        },
+        withPhantomIds: {
+          count: categorized.withPhantomIds.length,
+          tasks: categorized.withPhantomIds.map(t => ({
+            name: t.notion_name,
+            phantomMotionId: t.motion_task_id,
+            errorCount: t.error_count
+          }))
+        },
+        synced: {
+          count: categorized.synced.length
+        }
+      },
+      tasksForSlowSyncSample: tasksForSlowSync.slice(0, 5).map(t => ({
+        name: t.notion_name,
+        motionId: t.motion_task_id,
+        syncNeeded: t.motion_sync_needed,
+        lastAttempt: t.motion_last_attempt,
+        priority: t.motion_priority,
+        syncStatus: t.sync_status
+      }))
+    });
+  } catch (error) {
+    logger.error('Error checking scheduled tasks state', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;
