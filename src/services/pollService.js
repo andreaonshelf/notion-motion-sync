@@ -281,10 +281,25 @@ class PollService {
               created: orphan.createdTime,
               age: `${Math.round((Date.now() - new Date(orphan.createdTime).getTime()) / 60000)} minutes`
             });
+            
+            // Delete from Motion
             await motionClient.deleteTask(orphan.id);
             
+            // Find and clear the Motion ID from Notion
+            const notionTaskWithThisId = notionTasks.find(t => t.motionTaskId === orphan.id);
+            if (notionTaskWithThisId) {
+              logger.info(`Clearing Motion ID from Notion task: ${notionTaskWithThisId.name}`);
+              await notionClient.updateTask(notionTaskWithThisId.id, { motionTaskId: '' });
+              
+              // Clear from database too
+              await database.pool.query(
+                'UPDATE sync_tasks SET motion_task_id = NULL WHERE notion_page_id = $1',
+                [notionTaskWithThisId.id]
+              );
+            }
+            
             // Log deletion
-            await database.logSync(null, orphan.id, 'orphan_deleted', {
+            await database.logSync(notionTaskWithThisId?.id || null, orphan.id, 'orphan_deleted', {
               name: orphan.name
             });
             
