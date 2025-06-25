@@ -175,7 +175,7 @@ class MotionClient {
         params.workspaceId = config.motion.workspaceId;
       }
       
-      logger.info('Fetching Motion tasks with params', { params });
+      logger.info('Fetching Motion tasks with params', { params, method: 'listTasks' });
       
       let allTasks = [];
       let cursor = null;

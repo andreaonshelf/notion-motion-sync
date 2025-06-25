@@ -374,4 +374,24 @@ router.get('/database-errors', async (req, res) => {
   }
 });
 
+router.get('/test-motion-pagination', async (req, res) => {
+  try {
+    logger.info('Testing Motion pagination...');
+    const response = await motionClient.client.get('/tasks', { 
+      params: { workspaceId: require('../config').config.motion.workspaceId } 
+    });
+    
+    res.json({
+      taskCount: response.data.tasks?.length || 0,
+      hasCursor: !!response.data.cursor,
+      cursor: response.data.cursor,
+      firstTask: response.data.tasks?.[0]?.name,
+      lastTask: response.data.tasks?.[response.data.tasks?.length - 1]?.name
+    });
+  } catch (error) {
+    logger.error('Motion pagination test failed', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;
