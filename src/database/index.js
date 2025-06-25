@@ -477,13 +477,26 @@ class DatabaseWrapper {
 
   // Detect tasks that need Motion operations based on schedule/changes
   async detectMotionSyncNeeds() {
-    // New scheduled tasks without Motion ID
+    // New scheduled tasks without Motion ID OR with invalid Motion ID
     await this.pool.query(`
       UPDATE sync_tasks 
-      SET motion_sync_needed = true, motion_priority = 1
+      SET motion_sync_needed = true, 
+          motion_priority = 1,
+          motion_task_id = CASE 
+            WHEN motion_task_id IS NOT NULL AND motion_last_attempt > NOW() - INTERVAL '10 minutes' 
+            THEN NULL 
+            ELSE motion_task_id 
+          END
       WHERE schedule_checkbox = true 
-        AND motion_task_id IS NULL
         AND motion_sync_needed = false
+        AND (
+          motion_task_id IS NULL 
+          OR (
+            motion_task_id IS NOT NULL 
+            AND motion_last_attempt IS NOT NULL 
+            AND motion_last_attempt < NOW() - INTERVAL '10 minutes'
+          )
+        )
     `);
 
     // Unscheduled tasks with Motion ID

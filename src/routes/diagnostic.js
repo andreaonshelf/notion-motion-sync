@@ -490,6 +490,30 @@ router.post('/force-revalidate-all', async (req, res) => {
   }
 });
 
+router.post('/fix-scheduled-task-motion-id', async (req, res) => {
+  try {
+    // Clear Motion ID for scheduled task that has invalid Motion ID
+    const result = await database.pool.query(`
+      UPDATE sync_tasks 
+      SET motion_task_id = NULL, 
+          motion_sync_needed = true, 
+          motion_priority = 1,
+          motion_last_attempt = NULL
+      WHERE schedule_checkbox = true 
+        AND notion_name = 'New Version of Pitch Deck'
+      RETURNING *
+    `);
+    
+    res.json({
+      success: true,
+      fixed: result.rowCount,
+      task: result.rows[0]
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.post('/fix-broken-motion-ids', async (req, res) => {
   try {
     // Get all tasks with 404 errors

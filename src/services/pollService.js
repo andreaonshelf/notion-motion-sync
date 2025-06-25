@@ -346,6 +346,10 @@ class PollService {
       );
       const validMotionIds = new Set(scheduledTasks.map(t => t.motion_task_id));
       
+      logger.info(`Found ${scheduledTasks.length} scheduled tasks with Motion IDs`, {
+        validIds: Array.from(validMotionIds)
+      });
+      
       // Find orphaned Motion tasks (exist in Motion but not in our scheduled tasks)
       const orphanedTasks = motionTasks.filter(task => !validMotionIds.has(task.id));
       
