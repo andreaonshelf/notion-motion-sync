@@ -487,4 +487,50 @@ router.post('/fix-broken-motion-ids', async (req, res) => {
   }
 });
 
+router.get('/verify-phantom-ids', async (req, res) => {
+  try {
+    logger.info('Checking for phantom Motion IDs...');
+    
+    // Get all Notion tasks with Motion IDs
+    const notionTasks = await notionClient.queryDatabase();
+    const tasksWithMotionIds = notionTasks.filter(t => t.motionTaskId);
+    
+    // Check each Motion ID
+    const phantomIds = [];
+    const validIds = [];
+    
+    for (const task of tasksWithMotionIds) {
+      try {
+        const motionTask = await motionClient.getTask(task.motionTaskId);
+        if (motionTask && motionTask.id === task.motionTaskId) {
+          validIds.push({
+            notionName: task.name,
+            motionId: task.motionTaskId,
+            motionName: motionTask.name
+          });
+        }
+      } catch (error) {
+        if (error.response?.status === 404) {
+          phantomIds.push({
+            notionId: task.id,
+            notionName: task.name,
+            phantomMotionId: task.motionTaskId,
+            lastEdited: task.lastEdited
+          });
+        }
+      }
+    }
+    
+    res.json({
+      totalChecked: tasksWithMotionIds.length,
+      validMotionIds: validIds.length,
+      phantomMotionIds: phantomIds.length,
+      phantomTasks: phantomIds
+    });
+  } catch (error) {
+    logger.error('Error verifying phantom IDs', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;
