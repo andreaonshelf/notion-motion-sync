@@ -95,8 +95,10 @@ class SyncService {
         description: motionTask.description || '',
         status: this.mapMotionStatusToNotion(motionTask.status?.name || motionTask.status),
         priority: this.mapMotionPriorityToNotion(motionTask.priority),
-        dueDate: motionTask.dueDate,
-        duration: motionTask.duration || null,
+        // DON'T sync dueDate from Motion - Notion is source of truth
+        // dueDate: motionTask.dueDate,
+        // DON'T sync duration from Motion - Notion is source of truth
+        // duration: motionTask.duration || null,
         motionTaskId: motionTaskId
       };
       
