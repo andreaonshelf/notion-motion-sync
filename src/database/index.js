@@ -140,9 +140,20 @@ class DatabaseWrapper {
         ADD COLUMN IF NOT EXISTS status TEXT;
       `);
       
-      // Create index for schedule checkbox
+      // Add multi-speed sync fields
+      await this.pool.query(`
+        ALTER TABLE sync_tasks 
+        ADD COLUMN IF NOT EXISTS motion_sync_needed BOOLEAN DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS motion_priority INTEGER DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS motion_last_attempt TIMESTAMP,
+        ADD COLUMN IF NOT EXISTS notion_sync_needed BOOLEAN DEFAULT FALSE;
+      `);
+      
+      // Create indexes
       await this.pool.query(`
         CREATE INDEX IF NOT EXISTS idx_schedule ON sync_tasks(schedule_checkbox);
+        CREATE INDEX IF NOT EXISTS idx_motion_sync ON sync_tasks(motion_sync_needed, motion_priority);
+        CREATE INDEX IF NOT EXISTS idx_notion_sync ON sync_tasks(notion_sync_needed);
       `);
       
       logger.info('Migrations completed successfully');
@@ -387,6 +398,111 @@ class DatabaseWrapper {
   async run(sql, params = []) {
     const result = await this.pool.query(sql, params);
     return { changes: result.rowCount };
+  }
+
+  // Multi-speed sync methods
+
+  // Get tasks that need Motion operations (slow sync)
+  async getMotionTasksToProcess(limit = 5) {
+    const query = `
+      SELECT * FROM sync_tasks 
+      WHERE motion_sync_needed = true
+        AND (motion_last_attempt IS NULL OR motion_last_attempt < NOW() - INTERVAL '2 minutes')
+      ORDER BY 
+        motion_priority ASC,
+        motion_last_attempt ASC NULLS FIRST,
+        updated_at ASC
+      LIMIT $1
+    `;
+    const result = await this.pool.query(query, [limit]);
+    return result.rows;
+  }
+
+  // Get tasks that need Notion updates (fast sync)
+  async getNotionTasksToUpdate(limit = 20) {
+    const query = `
+      SELECT * FROM sync_tasks 
+      WHERE notion_sync_needed = true
+      ORDER BY updated_at ASC
+      LIMIT $1
+    `;
+    const result = await this.pool.query(query, [limit]);
+    return result.rows;
+  }
+
+  // Mark task as needing Motion operation
+  async markMotionSyncNeeded(notionPageId, priority = 2) {
+    const query = `
+      UPDATE sync_tasks 
+      SET motion_sync_needed = true, 
+          motion_priority = $1
+      WHERE notion_page_id = $2
+    `;
+    await this.pool.query(query, [priority, notionPageId]);
+  }
+
+  // Mark task as needing Notion update
+  async markNotionSyncNeeded(notionPageId) {
+    const query = `
+      UPDATE sync_tasks 
+      SET notion_sync_needed = true
+      WHERE notion_page_id = $1
+    `;
+    await this.pool.query(query, [notionPageId]);
+  }
+
+  // Complete Motion operation
+  async completeMotionSync(notionPageId, motionTaskId = null) {
+    const query = `
+      UPDATE sync_tasks 
+      SET motion_sync_needed = false,
+          motion_last_attempt = CURRENT_TIMESTAMP,
+          motion_task_id = $1,
+          notion_sync_needed = CASE WHEN $1 IS NOT NULL THEN true ELSE notion_sync_needed END
+      WHERE notion_page_id = $2
+    `;
+    await this.pool.query(query, [motionTaskId, notionPageId]);
+  }
+
+  // Complete Notion update
+  async completeNotionSync(notionPageId) {
+    const query = `
+      UPDATE sync_tasks 
+      SET notion_sync_needed = false
+      WHERE notion_page_id = $1
+    `;
+    await this.pool.query(query, [notionPageId]);
+  }
+
+  // Detect tasks that need Motion operations based on schedule/changes
+  async detectMotionSyncNeeds() {
+    // New scheduled tasks without Motion ID
+    await this.pool.query(`
+      UPDATE sync_tasks 
+      SET motion_sync_needed = true, motion_priority = 1
+      WHERE schedule_checkbox = true 
+        AND motion_task_id IS NULL
+        AND motion_sync_needed = false
+    `);
+
+    // Unscheduled tasks with Motion ID
+    await this.pool.query(`
+      UPDATE sync_tasks 
+      SET motion_sync_needed = true, motion_priority = 3
+      WHERE schedule_checkbox = false 
+        AND motion_task_id IS NOT NULL
+        AND motion_sync_needed = false
+    `);
+
+    // Updated scheduled tasks
+    await this.pool.query(`
+      UPDATE sync_tasks 
+      SET motion_sync_needed = true, motion_priority = 2
+      WHERE schedule_checkbox = true 
+        AND motion_task_id IS NOT NULL
+        AND notion_last_edited > motion_last_synced
+        AND motion_sync_needed = false
+    `);
   }
 
   async close() {

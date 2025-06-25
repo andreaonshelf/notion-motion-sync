@@ -9,6 +9,8 @@ class SyncService {
   }
 
   async syncNotionToMotion(notionPageId) {
+    logger.warn('syncNotionToMotion() is deprecated in two-speed architecture, should use database queue instead', { notionPageId });
+    
     if (this.syncInProgress.has(notionPageId)) {
       logger.warn('Sync already in progress for Notion page', { notionPageId });
       return;
@@ -46,10 +48,7 @@ class SyncService {
               phantomMotionId: notionTask.motionTaskId
             });
             
-            // Clear the phantom Motion ID in Notion
-            await notionClient.updateTask(notionPageId, { motionTaskId: '' });
-            
-            // Remove from cache and database
+            // Remove from cache and database (Notion will be updated by fast sync)
             await mappingCache.removeByNotionId(notionPageId);
             
             // Create new task
@@ -78,12 +77,7 @@ class SyncService {
               throw new Error(`Motion task creation failed: ${verifyError.message}`);
             }
             
-            // Update Notion with the new Motion ID
-            await notionClient.updateTask(notionPageId, {
-              motionTaskId: motionTask.id
-            });
-            
-            // Cache the mapping
+            // Store Motion ID in database (Notion will be updated by fast sync)
             await mappingCache.setMapping(notionPageId, motionTask.id);
             
             logger.info('Created Motion task after clearing phantom ID', { 
@@ -154,11 +148,7 @@ class SyncService {
           throw new Error(`Task verification failed: ${motionTask.id} not found (likely deleted by cleanup)`);
         }
         
-        await notionClient.updateTask(notionPageId, {
-          motionTaskId: motionTask.id
-        });
-        
-        // Cache the mapping
+        // Store Motion ID in database (Notion will be updated by fast sync)
         await mappingCache.setMapping(notionPageId, motionTask.id);
         
         logger.info('Created Motion task from Notion', { 
@@ -265,21 +255,18 @@ class SyncService {
 
   async performFullSync() {
     try {
-      logger.info('Starting full sync using database approach');
+      logger.info('Starting full sync using two-speed approach');
       
-      // Just trigger the poll service methods which use the database
+      // Use the new two-speed sync architecture
       const pollService = require('./pollService');
       
-      // Update Notion data in database
-      await pollService.updateNotionData();
+      // Fast sync: Notion ↔ Database
+      await pollService.fastSync();
       
-      // Sync only changed tasks
-      await pollService.syncChangedTasks();
+      // Slow sync: Database ↔ Motion
+      await pollService.slowSync();
       
-      // Clean up orphaned Motion tasks
-      await pollService.cleanupOrphanedMotionTasks();
-      
-      logger.info('Full sync completed using smart sync');
+      logger.info('Full sync completed using two-speed architecture');
     } catch (error) {
       logger.error('Error during full sync', { error: error.message });
       throw error;
@@ -288,21 +275,18 @@ class SyncService {
 
   async syncAllMotionTasks() {
     try {
-      logger.info('Starting Motion to Notion sync using database approach');
+      logger.info('Starting Motion to Notion sync using two-speed approach');
       
-      // Just trigger the poll service methods which use the database
+      // Use the new two-speed sync architecture  
       const pollService = require('./pollService');
       
-      // Update Notion data in database
-      await pollService.updateNotionData();
+      // Fast sync: Notion ↔ Database
+      await pollService.fastSync();
       
-      // Sync only changed tasks
-      await pollService.syncChangedTasks();
+      // Slow sync: Database ↔ Motion
+      await pollService.slowSync();
       
-      // Clean up orphaned Motion tasks
-      await pollService.cleanupOrphanedMotionTasks();
-      
-      logger.info('Motion to Notion sync completed using smart sync');
+      logger.info('Motion to Notion sync completed using two-speed architecture');
     } catch (error) {
       logger.error('Error during Motion to Notion sync', { error: error.message });
       throw error;
