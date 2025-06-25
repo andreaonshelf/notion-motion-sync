@@ -20,23 +20,82 @@ class SyncService {
       const notionTask = await notionClient.getTask(notionPageId);
       
       if (notionTask.motionTaskId) {
-        const enhancedDescription = this.enhanceDescriptionWithAttachments(notionTask);
-        const motionTask = await motionClient.updateTask(notionTask.motionTaskId, {
-          name: notionTask.name,
-          description: enhancedDescription,
-          status: notionTask.status,
-          priority: notionTask.priority,
-          dueDate: notionTask.dueDate,
-          duration: notionTask.duration
-        });
-        
-        // Ensure mapping is cached
-        await mappingCache.setMapping(notionPageId, notionTask.motionTaskId);
-        
-        logger.info('Updated Motion task from Notion', { 
-          notionPageId, 
-          motionTaskId: motionTask.id 
-        });
+        try {
+          const enhancedDescription = this.enhanceDescriptionWithAttachments(notionTask);
+          const motionTask = await motionClient.updateTask(notionTask.motionTaskId, {
+            name: notionTask.name,
+            description: enhancedDescription,
+            status: notionTask.status,
+            priority: notionTask.priority,
+            dueDate: notionTask.dueDate,
+            duration: notionTask.duration
+          });
+          
+          // Ensure mapping is cached
+          await mappingCache.setMapping(notionPageId, notionTask.motionTaskId);
+          
+          logger.info('Updated Motion task from Notion', { 
+            notionPageId, 
+            motionTaskId: motionTask.id 
+          });
+        } catch (updateError) {
+          // If we get a 404, the Motion task doesn't exist - clear the phantom ID and create new
+          if (updateError.response?.status === 404) {
+            logger.warn('Motion task not found (phantom ID), clearing and creating new', {
+              notionPageId,
+              phantomMotionId: notionTask.motionTaskId
+            });
+            
+            // Clear the phantom Motion ID in Notion
+            await notionClient.updateTask(notionPageId, { motionTaskId: '' });
+            
+            // Remove from cache and database
+            await mappingCache.removeByNotionId(notionPageId);
+            
+            // Create new task
+            const enhancedDescription = this.enhanceDescriptionWithAttachments(notionTask);
+            const motionTask = await motionClient.createTask({
+              name: notionTask.name,
+              description: enhancedDescription,
+              status: notionTask.status,
+              priority: notionTask.priority,
+              dueDate: notionTask.dueDate,
+              duration: notionTask.duration
+            });
+            
+            // Verify the task was actually created
+            try {
+              const verifyTask = await motionClient.getTask(motionTask.id);
+              if (!verifyTask || verifyTask.id !== motionTask.id) {
+                throw new Error('Motion task verification failed - task not found after creation');
+              }
+            } catch (verifyError) {
+              logger.error('Motion task creation verification failed', {
+                notionPageId,
+                motionTaskId: motionTask.id,
+                error: verifyError.message
+              });
+              throw new Error(`Motion task creation failed: ${verifyError.message}`);
+            }
+            
+            // Update Notion with the new Motion ID
+            await notionClient.updateTask(notionPageId, {
+              motionTaskId: motionTask.id
+            });
+            
+            // Cache the mapping
+            await mappingCache.setMapping(notionPageId, motionTask.id);
+            
+            logger.info('Created Motion task after clearing phantom ID', { 
+              notionPageId, 
+              motionTaskId: motionTask.id,
+              oldPhantomId: notionTask.motionTaskId
+            });
+          } else {
+            // Other errors, re-throw
+            throw updateError;
+          }
+        }
       } else {
         // No Motion ID stored in Notion, create new task
         const enhancedDescription = this.enhanceDescriptionWithAttachments(notionTask);
@@ -48,6 +107,21 @@ class SyncService {
           dueDate: notionTask.dueDate,
           duration: notionTask.duration
         });
+        
+        // Verify the task was actually created in Motion
+        try {
+          const verifyTask = await motionClient.getTask(motionTask.id);
+          if (!verifyTask || verifyTask.id !== motionTask.id) {
+            throw new Error('Motion task verification failed - task not found after creation');
+          }
+        } catch (verifyError) {
+          logger.error('Motion task creation verification failed', {
+            notionPageId,
+            motionTaskId: motionTask.id,
+            error: verifyError.message
+          });
+          throw new Error(`Motion task creation failed: ${verifyError.message}`);
+        }
         
         await notionClient.updateTask(notionPageId, {
           motionTaskId: motionTask.id

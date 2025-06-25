@@ -431,4 +431,60 @@ router.post('/force-revalidate-all', async (req, res) => {
   }
 });
 
+router.post('/fix-broken-motion-ids', async (req, res) => {
+  try {
+    // Get all tasks with 404 errors
+    const brokenTasks = await database.all(`
+      SELECT * FROM sync_tasks 
+      WHERE sync_status = 'error' 
+      AND error_message LIKE '%404%'
+    `);
+    
+    let fixed = 0;
+    for (const task of brokenTasks) {
+      try {
+        // Clear Motion ID in Notion
+        await notionClient.updateTask(task.notion_page_id, { motionTaskId: '' });
+        
+        // Clear Motion ID in database
+        await database.pool.query(`
+          UPDATE sync_tasks 
+          SET motion_task_id = NULL, 
+              sync_status = 'pending',
+              error_message = NULL,
+              error_count = 0
+          WHERE notion_page_id = $1
+        `, [task.notion_page_id]);
+        
+        // Clear from mapping cache
+        await mappingCache.removeByNotionId(task.notion_page_id);
+        
+        fixed++;
+        logger.info('Cleared broken Motion ID', { 
+          taskName: task.notion_name,
+          oldMotionId: task.motion_task_id 
+        });
+      } catch (error) {
+        logger.error('Failed to fix broken Motion ID', { 
+          task: task.notion_name, 
+          error: error.message 
+        });
+      }
+    }
+    
+    res.json({
+      success: true,
+      brokenTasksFound: brokenTasks.length,
+      fixed: fixed,
+      tasks: brokenTasks.map(t => ({
+        name: t.notion_name,
+        brokenMotionId: t.motion_task_id
+      }))
+    });
+  } catch (error) {
+    logger.error('Error fixing broken Motion IDs', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;
