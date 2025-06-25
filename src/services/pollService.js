@@ -221,11 +221,23 @@ class PollService {
               [task.notion_page_id]
             );
           } else if (error.response?.status === 404 && task.motion_task_id) {
-            // Motion task doesn't exist - clear the phantom ID
-            logger.warn('Motion task not found, clearing phantom ID', { 
-              motionTaskId: task.motion_task_id 
+            // Motion task doesn't exist - clear the phantom ID and mark for immediate retry
+            logger.warn('Motion task not found, clearing phantom ID and marking for recreation', { 
+              motionTaskId: task.motion_task_id,
+              taskName: task.notion_name
             });
-            await database.completeMotionSync(task.notion_page_id, null);
+            // Clear the phantom ID and reset for immediate recreation
+            await database.pool.query(
+              `UPDATE sync_tasks 
+               SET motion_task_id = NULL,
+                   motion_sync_needed = true,
+                   motion_priority = 1,
+                   motion_last_attempt = NULL,
+                   sync_status = 'pending',
+                   notion_sync_needed = true
+               WHERE notion_page_id = $1`,
+              [task.notion_page_id]
+            );
           } else if (error.response?.status >= 500) {
             // Server error - retry with exponential backoff
             logger.warn('Motion API server error, will retry with backoff');

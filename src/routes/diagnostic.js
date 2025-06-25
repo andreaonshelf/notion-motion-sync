@@ -686,29 +686,28 @@ router.get('/verify-phantom-ids', async (req, res) => {
     const notionTasks = await notionClient.queryDatabase();
     const tasksWithMotionIds = notionTasks.filter(t => t.motionTaskId);
     
+    // Get all Motion tasks
+    const motionResponse = await motionClient.listTasks();
+    const motionTasks = motionResponse.tasks || [];
+    const motionTaskIds = new Set(motionTasks.map(t => t.id));
+    
     // Check each Motion ID
     const phantomIds = [];
     const validIds = [];
     
     for (const task of tasksWithMotionIds) {
-      try {
-        const motionTask = await motionClient.getTask(task.motionTaskId);
-        if (motionTask && motionTask.id === task.motionTaskId) {
-          validIds.push({
-            notionName: task.name,
-            motionId: task.motionTaskId,
-            motionName: motionTask.name
-          });
-        }
-      } catch (error) {
-        if (error.response?.status === 404) {
-          phantomIds.push({
-            notionId: task.id,
-            notionName: task.name,
-            phantomMotionId: task.motionTaskId,
-            lastEdited: task.lastEdited
-          });
-        }
+      if (motionTaskIds.has(task.motionTaskId)) {
+        validIds.push({
+          notionName: task.name,
+          motionId: task.motionTaskId
+        });
+      } else {
+        phantomIds.push({
+          notionId: task.id,
+          notionName: task.name,
+          phantomMotionId: task.motionTaskId,
+          lastEdited: task.lastEdited
+        });
       }
     }
     
@@ -716,10 +715,48 @@ router.get('/verify-phantom-ids', async (req, res) => {
       totalChecked: tasksWithMotionIds.length,
       validMotionIds: validIds.length,
       phantomMotionIds: phantomIds.length,
+      actualMotionTaskCount: motionTasks.length,
       phantomTasks: phantomIds
     });
   } catch (error) {
     logger.error('Error verifying phantom IDs', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/clear-phantom-ids', async (req, res) => {
+  try {
+    logger.info('Clearing all phantom Motion IDs...');
+    
+    // Get all Motion tasks to know what's valid
+    const motionResponse = await motionClient.listTasks();
+    const motionTasks = motionResponse.tasks || [];
+    const validMotionIds = new Set(motionTasks.map(t => t.id));
+    
+    // Clear any Motion IDs that don't exist in Motion
+    const result = await database.pool.query(`
+      UPDATE sync_tasks 
+      SET motion_task_id = NULL,
+          motion_sync_needed = true,
+          motion_priority = 1,
+          motion_last_attempt = NULL,
+          sync_status = 'pending',
+          notion_sync_needed = true
+      WHERE motion_task_id IS NOT NULL
+        AND motion_task_id NOT IN (${Array.from(validMotionIds).map((_, i) => `$${i + 1}`).join(',')})
+      RETURNING notion_name, motion_task_id
+    `, Array.from(validMotionIds));
+    
+    res.json({
+      success: true,
+      clearedCount: result.rowCount,
+      clearedTasks: result.rows.map(r => ({
+        name: r.notion_name,
+        oldMotionId: r.motion_task_id
+      }))
+    });
+  } catch (error) {
+    logger.error('Error clearing phantom IDs', { error: error.message });
     res.status(500).json({ error: error.message });
   }
 });
