@@ -173,12 +173,15 @@ class DatabaseWrapper {
         OR (motion_task_id IS NOT NULL AND notion_last_edited > motion_last_synced)
         -- Stuck syncing tasks
         OR (sync_status = 'syncing' AND sync_lock_until < NOW())
+        -- Periodic re-validation: check all tasks every 30 minutes
+        OR (motion_task_id IS NOT NULL AND motion_last_synced < NOW() - INTERVAL '30 minutes')
       )
       ORDER BY 
         CASE 
           WHEN sync_status = 'error' THEN error_count
           ELSE 0
         END ASC,
+        motion_last_synced ASC NULLS FIRST,
         notion_last_edited DESC
       LIMIT $1;
     `;

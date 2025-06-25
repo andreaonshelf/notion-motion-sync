@@ -139,8 +139,46 @@ class PollService {
             continue;
           }
           
-          // Sync to Motion
-          await syncService.syncNotionToMotion(syncTask.notion_page_id);
+          // Check if Motion task exists and has correct data
+          let needsSync = true;
+          if (syncTask.motion_task_id) {
+            try {
+              const motionTask = await motionClient.getTask(syncTask.motion_task_id);
+              
+              // Check if all fields match
+              const durationMatches = motionTask.duration === notionTask.duration;
+              const dueDateMatches = motionTask.dueDate && 
+                new Date(motionTask.dueDate).toISOString().split('T')[0] === notionTask.dueDate;
+              
+              if (!durationMatches || !dueDateMatches) {
+                logger.info('Task fields mismatch, forcing sync', {
+                  name: notionTask.name,
+                  durationMismatch: !durationMatches,
+                  dueDateMismatch: !dueDateMatches,
+                  motionDuration: motionTask.duration,
+                  notionDuration: notionTask.duration,
+                  motionDueDate: motionTask.dueDate,
+                  notionDueDate: notionTask.dueDate
+                });
+                needsSync = true;
+              } else {
+                needsSync = false;
+              }
+            } catch (error) {
+              logger.warn('Could not fetch Motion task, will sync', { 
+                motionTaskId: syncTask.motion_task_id,
+                error: error.message 
+              });
+              needsSync = true;
+            }
+          }
+          
+          if (needsSync) {
+            // Sync to Motion
+            await syncService.syncNotionToMotion(syncTask.notion_page_id);
+          } else {
+            logger.debug('Task already in sync, skipping', { name: notionTask.name });
+          }
           
           // Mark sync successful
           await database.markSyncSuccess(
