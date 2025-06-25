@@ -309,21 +309,32 @@ router.get('/database-stats', async (req, res) => {
   }
 });
 
-router.get('/sync-history/:pageId?', async (req, res) => {
+router.get('/sync-history', async (req, res) => {
+  try {
+    const history = await database.all(
+      'SELECT * FROM sync_history ORDER BY timestamp DESC LIMIT 50'
+    );
+    
+    res.json({
+      count: history.length,
+      history: history.map(h => ({
+        ...h,
+        changes: h.changes ? JSON.parse(h.changes) : null
+      }))
+    });
+  } catch (error) {
+    logger.error('Error getting sync history', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/sync-history/:pageId', async (req, res) => {
   try {
     const { pageId } = req.params;
-    let history;
-    
-    if (pageId) {
-      history = await database.all(
-        'SELECT * FROM sync_history WHERE notion_page_id = $1 ORDER BY timestamp DESC LIMIT 20',
-        [pageId]
-      );
-    } else {
-      history = await database.all(
-        'SELECT * FROM sync_history ORDER BY timestamp DESC LIMIT 50'
-      );
-    }
+    const history = await database.all(
+      'SELECT * FROM sync_history WHERE notion_page_id = $1 ORDER BY timestamp DESC LIMIT 20',
+      [pageId]
+    );
     
     res.json({
       count: history.length,
