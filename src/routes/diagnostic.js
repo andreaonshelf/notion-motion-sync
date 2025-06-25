@@ -118,6 +118,8 @@ router.get('/motion-task/:taskId', async (req, res) => {
         duration: task.duration,
         status: task.status,
         priority: task.priority,
+        workspaceId: task.workspaceId,
+        workspace: task.workspace,
         description: task.description?.substring(0, 100)
       }
     });
