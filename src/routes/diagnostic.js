@@ -892,6 +892,53 @@ router.get('/check-phantom/:motionId', async (req, res) => {
   }
 });
 
+router.post('/clear-motion-ids', async (req, res) => {
+  try {
+    const { notionPageIds } = req.body;
+    
+    if (!notionPageIds || !Array.isArray(notionPageIds) || notionPageIds.length === 0) {
+      return res.status(400).json({ error: 'notionPageIds array is required' });
+    }
+    
+    logger.info('Manually clearing Motion IDs', { count: notionPageIds.length });
+    
+    // Clear Motion IDs from Notion
+    const cleared = [];
+    for (const pageId of notionPageIds) {
+      try {
+        await notionClient.updateTask(pageId, { motionTaskId: '' });
+        cleared.push(pageId);
+      } catch (error) {
+        logger.error(`Failed to clear Motion ID from Notion page ${pageId}`, { error: error.message });
+      }
+    }
+    
+    // Clear Motion IDs from database
+    const placeholders = notionPageIds.map((_, i) => `$${i + 1}`).join(',');
+    const result = await database.pool.query(`
+      UPDATE sync_tasks 
+      SET motion_task_id = NULL,
+          motion_sync_needed = true,
+          motion_priority = 1,
+          motion_last_attempt = NULL,
+          sync_status = 'pending',
+          notion_sync_needed = false
+      WHERE notion_page_id IN (${placeholders})
+      RETURNING notion_page_id, notion_name
+    `, notionPageIds);
+    
+    res.json({
+      success: true,
+      clearedFromNotion: cleared.length,
+      clearedFromDatabase: result.rowCount,
+      tasks: result.rows
+    });
+  } catch (error) {
+    logger.error('Error clearing Motion IDs', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.get('/scheduled-tasks-state', async (req, res) => {
   try {
     logger.info('Checking scheduled tasks state...');
