@@ -89,6 +89,7 @@ app.use('/test', testRoutes);
 app.use('/diagnostic', diagnosticRoutes);
 app.use('/debug', debugRoutes);
 app.use('/manual', manualSyncRoutes);
+app.use('/debug-scheduled', require('./routes/debug-scheduled-tasks'));
 
 app.use((req, res) => {
   res.status(404).json({ error: 'Not found' });
