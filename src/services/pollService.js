@@ -1,16 +1,15 @@
 const notionClient = require('./notionClient');
 const motionClient = require('./motionClient');
 const syncService = require('./syncService');
+const database = require('../database');
 const logger = require('../utils/logger');
 
 class PollService {
   constructor() {
-    this.lastSyncTimes = new Map();
-    this.motionTaskChecksums = new Map();
     this.pollInterval = null;
   }
 
-  start(intervalMinutes = 5) {
+  start(intervalMinutes = 3) {
     logger.info(`Starting poll service with ${intervalMinutes} minute interval`);
     
     // Run immediately on start
@@ -34,296 +33,204 @@ class PollService {
     try {
       logger.info('Polling for changes...');
       
-      // FIRST: Clean up any orphaned Motion tasks (deleted from Notion)
-      const motionResponse = await motionClient.listTasks();
-      await this.checkForOrphanedMotionTasks(motionResponse.tasks || []);
+      // Step 1: Update database with latest Notion data
+      await this.updateNotionData();
       
-      // THEN: Poll Motion changes (but don't create in Notion)
-      await this.pollMotionChanges();
+      // Step 2: Sync only tasks that need it
+      await this.syncChangedTasks();
       
-      // THEN: Check for field changes in existing synced tasks
-      await this.checkForFieldChanges();
-      
-      // FINALLY: Check for any Notion tasks without Motion IDs
-      await this.syncUnsyncedNotionTasks();
+      // Step 3: Clean up orphaned Motion tasks
+      await this.cleanupOrphanedMotionTasks();
       
     } catch (error) {
       logger.error('Error during polling', { error: error.message });
     }
   }
   
-  async syncUnsyncedNotionTasks() {
+  async updateNotionData() {
     try {
-      const notionClient = require('./notionClient');
-      const syncService = require('./syncService');
+      logger.info('Updating Notion data in database...');
       
-      const tasks = await notionClient.queryDatabase();
-      const unsyncedTasks = tasks.filter(task => !task.motionTaskId);
+      // Query only schedulable tasks from Notion
+      const filter = {
+        and: [
+          { property: 'Duration (minutes)', number: { is_not_empty: true } },
+          { property: 'Due date', date: { is_not_empty: true } },
+          { 
+            or: [
+              { property: 'Status', status: { equals: 'Not started' } },
+              { property: 'Status', status: { equals: 'In progress' } }
+            ]
+          }
+        ]
+      };
       
-      if (unsyncedTasks.length > 0) {
-        logger.info(`Found ${unsyncedTasks.length} unsynced Notion tasks during poll`);
+      const notionTasks = await notionClient.queryDatabase(filter);
+      logger.info(`Found ${notionTasks.length} schedulable tasks in Notion`);
+      
+      // Update database with latest task data
+      for (const task of notionTasks) {
+        await database.upsertSyncTask(task.id, {
+          name: task.name,
+          lastEdited: task.lastEdited
+        });
         
-        for (const task of unsyncedTasks) {
-          try {
-            await syncService.syncNotionToMotion(task.id);
-            logger.info(`Synced previously unsynced task: ${task.name}`);
-            // Rate limit
-            await new Promise(resolve => setTimeout(resolve, 2000));
-          } catch (error) {
-            logger.error(`Failed to sync unsynced task ${task.name}`, { error: error.message });
+        // If task has Motion ID, ensure it's in database
+        if (task.motionTaskId) {
+          const mapping = await database.getMappingByNotionId(task.id);
+          if (!mapping || !mapping.motion_task_id) {
+            await database.setMotionTaskId(task.id, task.motionTaskId);
           }
         }
       }
     } catch (error) {
-      logger.error('Error checking for unsynced Notion tasks', { error: error.message });
-    }
-  }
-
-  async pollNotionChanges() {
-    try {
-      const tasks = await notionClient.queryDatabase();
-      let changedCount = 0;
-      
-      for (const task of tasks) {
-        const lastSync = this.lastSyncTimes.get(task.id);
-        const taskLastEdited = new Date(task.lastEdited || task.lastSynced || 0).getTime();
-        
-        // If we haven't seen this task or it's been updated
-        if (!lastSync || taskLastEdited > lastSync) {
-          logger.info(`Detected Notion change: ${task.name}`);
-          await syncService.syncNotionToMotion(task.id);
-          this.lastSyncTimes.set(task.id, Date.now());
-          changedCount++;
-        }
-      }
-      
-      if (changedCount > 0) {
-        logger.info(`Notion poll: ${changedCount} tasks synced`);
-      }
-    } catch (error) {
-      logger.error('Error polling Notion', { error: error.message });
-    }
-  }
-
-  async pollMotionChanges() {
-    try {
-      const motionTasks = await motionClient.listTasks();
-      let changedCount = 0;
-      let deletedCount = 0;
-      
-      // Track current Motion task IDs
-      const currentMotionIds = new Set();
-      
-      // If this is the first run (no checksums), sync all tasks
-      const isFirstRun = this.motionTaskChecksums.size === 0;
-      if (isFirstRun) {
-        logger.info('First run detected, syncing all Motion tasks...');
-      }
-      
-      // Check for changes in existing tasks
-      for (const task of motionTasks.tasks || []) {
-        currentMotionIds.add(task.id);
-        const checksum = this.generateChecksum(task);
-        const lastChecksum = this.motionTaskChecksums.get(task.id);
-        
-        if (isFirstRun || lastChecksum !== checksum) {
-          // Only sync if this task already exists in Notion
-          // Don't create new Notion tasks from Motion
-          logger.info(`Detected Motion ${isFirstRun ? 'task' : 'change'}: ${task.name}`);
-          this.motionTaskChecksums.set(task.id, checksum);
-          changedCount++;
-        }
-      }
-      
-      // Check for deleted tasks
-      for (const [taskId, checksum] of this.motionTaskChecksums) {
-        if (!currentMotionIds.has(taskId)) {
-          logger.info(`Detected Motion deletion: ${taskId}`);
-          await syncService.handleMotionDeletion(taskId);
-          this.motionTaskChecksums.delete(taskId);
-          deletedCount++;
-        }
-      }
-      
-      // Don't need this here anymore - it's called at the beginning of pollForChanges
-      
-      if (changedCount > 0 || deletedCount > 0) {
-        logger.info(`Motion poll: ${changedCount} changed, ${deletedCount} deleted`);
-      }
-    } catch (error) {
-      logger.error('Error polling Motion', { error: error.message });
+      logger.error('Error updating Notion data', { error: error.message });
     }
   }
   
-  async checkForOrphanedMotionTasks(motionTasks) {
+  async syncChangedTasks() {
     try {
-      const notionClient = require('./notionClient');
+      // Get tasks that need syncing from database
+      const tasksToSync = await database.getTasksNeedingSync(5); // Process 5 at a time
       
-      // Get all Notion tasks
-      const notionTasks = await notionClient.queryDatabase();
+      if (tasksToSync.length === 0) {
+        logger.info('No tasks need syncing');
+        return;
+      }
       
-      // Create a set of all Motion IDs that exist in Notion
-      const notionMotionIds = new Set(
-        notionTasks
-          .filter(task => task.motionTaskId)
-          .map(task => task.motionTaskId)
-      );
+      logger.info(`Found ${tasksToSync.length} tasks needing sync`);
       
-      logger.info(`Notion has ${notionMotionIds.size} tasks with Motion IDs`);
-      logger.info(`Motion has ${motionTasks.length} total tasks`);
-      
-      // Check each Motion task
-      let deletedCount = 0;
-      for (const motionTask of motionTasks) {
-        if (!notionMotionIds.has(motionTask.id)) {
-          // This Motion task has no corresponding Notion task
-          logger.info(`Motion task "${motionTask.name}" (ID: ${motionTask.id}) has no corresponding Notion task - deleting from Motion`);
-          try {
-            await motionClient.deleteTask(motionTask.id);
-            logger.info(`Deleted orphaned Motion task: ${motionTask.name}`);
-            deletedCount++;
-            // Rate limit deletions
-            await new Promise(resolve => setTimeout(resolve, 1000));
-          } catch (error) {
-            logger.error(`Failed to delete orphaned Motion task: ${motionTask.name}`, { error: error.message });
+      for (const syncTask of tasksToSync) {
+        try {
+          // Lock the task
+          const locked = await database.lockTaskForSync(syncTask.id);
+          if (!locked) {
+            logger.warn('Could not lock task for sync', { id: syncTask.id });
+            continue;
           }
-        }
-      }
-      
-      if (deletedCount > 0) {
-        logger.info(`Deleted ${deletedCount} orphaned Motion tasks`);
-      }
-    } catch (error) {
-      logger.error('Error checking for orphaned Motion tasks', { error: error.message });
-    }
-  }
-
-  async checkForFieldChanges() {
-    try {
-      logger.info('Checking for field changes in synced tasks...');
-      
-      // Get all Notion tasks that have Motion IDs
-      const notionTasks = await notionClient.queryDatabase();
-      const syncedTasks = notionTasks.filter(task => task.motionTaskId);
-      
-      // Get all Motion tasks
-      const motionResponse = await motionClient.listTasks();
-      const motionTasksMap = new Map();
-      for (const task of motionResponse.tasks || []) {
-        motionTasksMap.set(task.id, task);
-      }
-      
-      let updatedCount = 0;
-      
-      // Check each synced task for differences
-      for (const notionTask of syncedTasks) {
-        const motionTask = motionTasksMap.get(notionTask.motionTaskId);
-        
-        if (!motionTask) {
-          logger.warn('Motion task not found for synced Notion task', {
-            notionTaskId: notionTask.id,
-            motionTaskId: notionTask.motionTaskId
-          });
-          continue;
-        }
-        
-        // For tasks with duration in Notion, fetch full details from Motion
-        // since listTasks doesn't return duration
-        let motionDuration = motionTask.duration;
-        if (notionTask.duration !== null && motionDuration === undefined) {
-          try {
-            const fullMotionTask = await motionClient.getTask(motionTask.id);
-            motionDuration = fullMotionTask.duration;
-            motionTask.duration = motionDuration; // Update for comparison
-            // Add small delay to avoid rate limits
-            await new Promise(resolve => setTimeout(resolve, 500));
-          } catch (error) {
-            logger.error('Failed to fetch full Motion task details', {
-              taskId: motionTask.id,
-              error: error.message
+          
+          // Log the sync attempt
+          await database.logSync(
+            syncTask.notion_page_id,
+            syncTask.motion_task_id,
+            'sync_start'
+          );
+          
+          // Get fresh data from Notion
+          const notionTask = await notionClient.getTask(syncTask.notion_page_id);
+          
+          // Check if task still meets criteria
+          if (!notionTask.duration || !notionTask.dueDate || 
+              notionTask.status === 'Done' || notionTask.status === 'Archived') {
+            logger.info('Task no longer needs scheduling', { 
+              name: notionTask.name,
+              status: notionTask.status 
             });
+            
+            // If it has a Motion ID, delete from Motion
+            if (syncTask.motion_task_id) {
+              await motionClient.deleteTask(syncTask.motion_task_id);
+              await database.removeMapping(syncTask.notion_page_id);
+            }
+            continue;
           }
-        }
-        
-        // Log comparison for Raycast task
-        if (notionTask.name === 'Raycast') {
-          logger.info('DEBUG: Raycast task comparison', {
-            notionDuration: notionTask.duration,
-            motionDuration: motionDuration,
-            durationsMatch: notionTask.duration === motionDuration,
-            notionStatus: notionTask.status,
-            motionStatus: this.mapMotionStatusToNotion(motionTask.status?.name || motionTask.status)
-          });
-        }
-        
-        // Check if any fields need updating
-        const needsUpdate = 
-          notionTask.name !== motionTask.name ||
-          notionTask.description !== (motionTask.description || '') ||
-          notionTask.status !== this.mapMotionStatusToNotion(motionTask.status?.name || motionTask.status) ||
-          notionTask.priority !== this.mapMotionPriorityToNotion(motionTask.priority) ||
-          notionTask.dueDate !== motionTask.dueDate ||
-          notionTask.duration !== motionDuration;
-        
-        if (needsUpdate) {
-          logger.info('Field change detected, syncing Notion to Motion', {
-            taskName: notionTask.name,
-            notionDuration: notionTask.duration,
-            motionDuration: motionTask.duration
+          
+          // Sync to Motion
+          await syncService.syncNotionToMotion(syncTask.notion_page_id);
+          
+          // Mark sync successful
+          await database.markSyncSuccess(
+            syncTask.id,
+            notionTask.motionTaskId || syncTask.motion_task_id,
+            notionTask.duration,
+            notionTask.dueDate
+          );
+          
+          // Log success
+          await database.logSync(
+            syncTask.notion_page_id,
+            notionTask.motionTaskId || syncTask.motion_task_id,
+            'sync_success',
+            {
+              duration: notionTask.duration,
+              dueDate: notionTask.dueDate,
+              status: notionTask.status
+            }
+          );
+          
+          // Rate limit between syncs
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+        } catch (error) {
+          logger.error('Failed to sync task', {
+            id: syncTask.id,
+            error: error.message
           });
           
+          // Mark sync failed
+          await database.markSyncError(syncTask.id, error.message);
+          
+          // Log error
+          await database.logSync(
+            syncTask.notion_page_id,
+            syncTask.motion_task_id,
+            'sync_error',
+            null,
+            error.message
+          );
+          
+          // If rate limited, wait longer
+          if (error.message.includes('429')) {
+            logger.info('Rate limited, waiting 30 seconds...');
+            await new Promise(resolve => setTimeout(resolve, 30000));
+          }
+        }
+      }
+    } catch (error) {
+      logger.error('Error syncing changed tasks', { error: error.message });
+    }
+  }
+  
+  async cleanupOrphanedMotionTasks() {
+    try {
+      // Get all Motion tasks
+      const motionResponse = await motionClient.listTasks();
+      const motionTasks = motionResponse.tasks || [];
+      
+      // Get all Motion IDs we're tracking
+      const trackedMotionIds = await database.db.all(
+        'SELECT motion_task_id FROM sync_tasks WHERE motion_task_id IS NOT NULL'
+      );
+      const trackedSet = new Set(trackedMotionIds.map(r => r.motion_task_id));
+      
+      // Find orphans
+      const orphans = motionTasks.filter(task => !trackedSet.has(task.id));
+      
+      if (orphans.length > 0) {
+        logger.info(`Found ${orphans.length} orphaned Motion tasks`);
+        
+        for (const orphan of orphans) {
           try {
-            await syncService.syncNotionToMotion(notionTask.id);
-            updatedCount++;
+            logger.info(`Deleting orphaned Motion task: ${orphan.name}`);
+            await motionClient.deleteTask(orphan.id);
+            
+            // Log deletion
+            await database.logSync(null, orphan.id, 'orphan_deleted', {
+              name: orphan.name
+            });
+            
             // Rate limit
             await new Promise(resolve => setTimeout(resolve, 1000));
           } catch (error) {
-            logger.error('Failed to sync field changes', {
-              taskName: notionTask.name,
-              error: error.message
+            logger.error(`Failed to delete orphan: ${orphan.name}`, { 
+              error: error.message 
             });
           }
         }
       }
-      
-      if (updatedCount > 0) {
-        logger.info(`Updated ${updatedCount} tasks with field changes`);
-      }
     } catch (error) {
-      logger.error('Error checking for field changes', { error: error.message });
+      logger.error('Error cleaning up orphans', { error: error.message });
     }
-  }
-  
-  mapMotionStatusToNotion(motionStatus) {
-    const statusMap = {
-      'Todo': 'Not started',
-      'In Progress': 'In progress',
-      'Completed': 'Done',
-      'Canceled': 'Archived',
-      'Backlog': 'Not started',
-      'Blocked': 'Not started'
-    };
-    return statusMap[motionStatus] || 'Not started';
-  }
-  
-  mapMotionPriorityToNotion(motionPriority) {
-    const priorityMap = {
-      'HIGH': 'High',
-      'MEDIUM': 'Medium',
-      'LOW': 'Low'
-    };
-    return priorityMap[motionPriority] || 'Medium';
-  }
-
-  generateChecksum(task) {
-    // Create a simple checksum of key fields
-    return JSON.stringify({
-      name: task.name,
-      status: task.status?.name || task.status,
-      priority: task.priority,
-      dueDate: task.dueDate,
-      description: task.description
-    });
   }
 }
 

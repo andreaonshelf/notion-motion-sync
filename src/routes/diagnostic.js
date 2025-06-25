@@ -3,6 +3,7 @@ const notionClient = require('../services/notionClient');
 const motionClient = require('../services/motionClient');
 const mappingCache = require('../services/mappingCache');
 const syncService = require('../services/syncService');
+const database = require('../database');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -85,12 +86,17 @@ router.get('/motion-sync-status', async (req, res) => {
   }
 });
 
-router.get('/cache-status', (req, res) => {
-  const stats = mappingCache.getStats();
-  res.json({
-    cacheStats: stats,
-    message: 'Cache is used to track Notion-Motion task mappings for deletion handling'
-  });
+router.get('/cache-status', async (req, res) => {
+  try {
+    const stats = await mappingCache.getStats();
+    res.json({
+      cacheStats: stats,
+      message: 'Cache is backed by SQLite database for persistence'
+    });
+  } catch (error) {
+    logger.error('Error getting cache stats', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
 });
 
 router.get('/recent-webhooks', (req, res) => {
@@ -276,6 +282,83 @@ router.get('/trial-tasks', async (req, res) => {
     });
   } catch (error) {
     logger.error('Error in trial tasks diagnostic', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/database-stats', async (req, res) => {
+  try {
+    const stats = await database.getStats();
+    const needingSync = await database.getTasksNeedingSync(10);
+    
+    res.json({
+      stats,
+      tasksNeedingSync: needingSync.length,
+      needingSyncSample: needingSync.slice(0, 5).map(t => ({
+        notion_page_id: t.notion_page_id,
+        notion_name: t.notion_name,
+        sync_status: t.sync_status,
+        error_message: t.error_message,
+        last_edited: t.notion_last_edited,
+        last_synced: t.motion_last_synced
+      }))
+    });
+  } catch (error) {
+    logger.error('Error getting database stats', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/sync-history/:pageId?', async (req, res) => {
+  try {
+    const { pageId } = req.params;
+    let history;
+    
+    if (pageId) {
+      history = await database.db.all(
+        'SELECT * FROM sync_history WHERE notion_page_id = ? ORDER BY timestamp DESC LIMIT 20',
+        [pageId]
+      );
+    } else {
+      history = await database.db.all(
+        'SELECT * FROM sync_history ORDER BY timestamp DESC LIMIT 50'
+      );
+    }
+    
+    res.json({
+      count: history.length,
+      history: history.map(h => ({
+        ...h,
+        changes: h.changes ? JSON.parse(h.changes) : null
+      }))
+    });
+  } catch (error) {
+    logger.error('Error getting sync history', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/database-errors', async (req, res) => {
+  try {
+    const errors = await database.db.all(`
+      SELECT * FROM sync_tasks 
+      WHERE sync_status = 'error' 
+      ORDER BY updated_at DESC 
+      LIMIT 20
+    `);
+    
+    res.json({
+      errorCount: errors.length,
+      errors: errors.map(e => ({
+        notion_page_id: e.notion_page_id,
+        notion_name: e.notion_name,
+        error_message: e.error_message,
+        error_count: e.error_count,
+        last_attempt: e.updated_at
+      }))
+    });
+  } catch (error) {
+    logger.error('Error getting database errors', { error: error.message });
     res.status(500).json({ error: error.message });
   }
 });

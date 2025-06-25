@@ -64,19 +64,41 @@ class NotionClient {
     }
   }
 
-  async queryDatabase(filter = {}) {
+  async queryDatabase(filter = null) {
     try {
       const queryParams = {
-        database_id: this.databaseId
+        database_id: this.databaseId,
+        page_size: 100
       };
       
-      // Only add filter if it's not empty
-      if (Object.keys(filter).length > 0) {
+      // Add filter if provided
+      if (filter) {
         queryParams.filter = filter;
       }
       
-      const response = await this.client.databases.query(queryParams);
-      return response.results.map(page => this.parseTask(page));
+      // Handle pagination
+      let allResults = [];
+      let hasMore = true;
+      let startCursor = undefined;
+      
+      while (hasMore) {
+        if (startCursor) {
+          queryParams.start_cursor = startCursor;
+        }
+        
+        const response = await this.client.databases.query(queryParams);
+        allResults = allResults.concat(response.results);
+        
+        hasMore = response.has_more;
+        startCursor = response.next_cursor;
+      }
+      
+      logger.info(`Queried Notion database`, { 
+        totalResults: allResults.length,
+        hasFilter: !!filter 
+      });
+      
+      return allResults.map(page => this.parseTask(page));
     } catch (error) {
       logger.error('Error querying Notion database', { error: error.message });
       throw error;

@@ -31,7 +31,7 @@ class SyncService {
         });
         
         // Ensure mapping is cached
-        mappingCache.setMapping(notionPageId, notionTask.motionTaskId);
+        await mappingCache.setMapping(notionPageId, notionTask.motionTaskId);
         
         logger.info('Updated Motion task from Notion', { 
           notionPageId, 
@@ -54,7 +54,7 @@ class SyncService {
         });
         
         // Cache the mapping
-        mappingCache.setMapping(notionPageId, motionTask.id);
+        await mappingCache.setMapping(notionPageId, motionTask.id);
         
         logger.info('Created Motion task from Notion', { 
           notionPageId, 
@@ -110,7 +110,7 @@ class SyncService {
         await notionClient.updateTask(notionPageId, taskData);
         
         // Ensure mapping is cached
-        mappingCache.setMapping(notionPageId, motionTaskId);
+        await mappingCache.setMapping(notionPageId, motionTaskId);
         
         logger.info('Updated Notion task from Motion', { 
           motionTaskId, 
@@ -252,7 +252,7 @@ class SyncService {
       
       // If Motion task ID not provided, try to get it from cache
       if (!motionTaskId) {
-        motionTaskId = mappingCache.getMotionId(notionPageId);
+        motionTaskId = await mappingCache.getMotionId(notionPageId);
         if (motionTaskId) {
           logger.info('Retrieved Motion task ID from cache', { notionPageId, motionTaskId });
         }
@@ -263,7 +263,7 @@ class SyncService {
         await motionClient.deleteTask(motionTaskId);
         
         // Remove from cache
-        mappingCache.removeByNotionId(notionPageId);
+        await mappingCache.removeByNotionId(notionPageId);
         
         logger.info('Notion page deleted - Motion task also deleted', { 
           notionPageId, 
@@ -302,7 +302,7 @@ class SyncService {
         });
         
         // Remove from cache since Motion task no longer exists
-        mappingCache.removeByMotionId(motionTaskId);
+        await mappingCache.removeByMotionId(motionTaskId);
         
         logger.info('Motion task deleted - Notion task archived', { 
           motionTaskId, 

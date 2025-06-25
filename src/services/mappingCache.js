@@ -1,112 +1,150 @@
 const logger = require('../utils/logger');
+const database = require('../database');
 
 class MappingCache {
   constructor() {
-    // In-memory cache mapping Notion page IDs to Motion task IDs
+    // Keep in-memory cache for performance, but database is source of truth
     this.notionToMotion = new Map();
-    // Reverse mapping for quick lookups
     this.motionToNotion = new Map();
   }
 
-  // Add or update a mapping
-  setMapping(notionPageId, motionTaskId) {
+  async initialize(notionClient) {
+    try {
+      logger.info('Initializing mapping cache and database...');
+      
+      // Initialize database first
+      await database.initialize();
+      
+      // Query all tasks from Notion
+      const tasks = await notionClient.queryDatabase();
+      
+      let mappedCount = 0;
+      let newCount = 0;
+      
+      for (const task of tasks) {
+        // Upsert into database
+        const syncTask = await database.upsertSyncTask(task.id, {
+          name: task.name,
+          lastEdited: task.lastEdited
+        });
+        
+        if (task.motionTaskId) {
+          // Update database with Motion ID if not already there
+          if (!syncTask.motion_task_id) {
+            await database.setMotionTaskId(task.id, task.motionTaskId);
+            newCount++;
+          }
+          
+          // Update in-memory cache
+          this.setMapping(task.id, task.motionTaskId);
+          mappedCount++;
+        }
+      }
+      
+      logger.info(`Database initialized with ${mappedCount} mappings (${newCount} new)`);
+      
+      // Load all mappings into memory for fast access
+      const allMappings = await database.db.all(
+        'SELECT notion_page_id, motion_task_id FROM sync_tasks WHERE motion_task_id IS NOT NULL'
+      );
+      
+      for (const mapping of allMappings) {
+        this.notionToMotion.set(mapping.notion_page_id, mapping.motion_task_id);
+        this.motionToNotion.set(mapping.motion_task_id, mapping.notion_page_id);
+      }
+      
+    } catch (error) {
+      logger.error('Failed to initialize mapping cache', { error: error.message });
+      throw error;
+    }
+  }
+
+  async setMapping(notionPageId, motionTaskId) {
     if (!notionPageId || !motionTaskId) {
       logger.warn('Attempted to set mapping with missing ID', { notionPageId, motionTaskId });
       return;
     }
-
-    // Remove any existing mappings for these IDs
-    const oldMotionId = this.notionToMotion.get(notionPageId);
-    const oldNotionId = this.motionToNotion.get(motionTaskId);
     
-    if (oldMotionId && oldMotionId !== motionTaskId) {
-      this.motionToNotion.delete(oldMotionId);
-    }
+    // Update database
+    await database.setMotionTaskId(notionPageId, motionTaskId);
     
-    if (oldNotionId && oldNotionId !== notionPageId) {
-      this.notionToMotion.delete(oldNotionId);
-    }
-
-    // Set new mappings
+    // Update in-memory cache
     this.notionToMotion.set(notionPageId, motionTaskId);
     this.motionToNotion.set(motionTaskId, notionPageId);
     
-    logger.info('Mapping cached', { 
-      notionPageId, 
-      motionTaskId,
-      totalMappings: this.notionToMotion.size 
-    });
+    logger.debug('Mapping set', { notionPageId, motionTaskId });
   }
 
-  // Get Motion task ID from Notion page ID
-  getMotionId(notionPageId) {
-    return this.notionToMotion.get(notionPageId) || null;
+  async getMotionId(notionPageId) {
+    // Try memory first
+    let motionId = this.notionToMotion.get(notionPageId);
+    
+    // Fall back to database
+    if (!motionId) {
+      const mapping = await database.getMappingByNotionId(notionPageId);
+      if (mapping && mapping.motion_task_id) {
+        motionId = mapping.motion_task_id;
+        // Update cache
+        this.notionToMotion.set(notionPageId, motionId);
+        this.motionToNotion.set(motionId, notionPageId);
+      }
+    }
+    
+    return motionId;
   }
 
-  // Get Notion page ID from Motion task ID
-  getNotionId(motionTaskId) {
-    return this.motionToNotion.get(motionTaskId) || null;
+  async getNotionId(motionTaskId) {
+    // Try memory first
+    let notionId = this.motionToNotion.get(motionTaskId);
+    
+    // Fall back to database
+    if (!notionId) {
+      const mapping = await database.getMappingByMotionId(motionTaskId);
+      if (mapping && mapping.notion_page_id) {
+        notionId = mapping.notion_page_id;
+        // Update cache
+        this.notionToMotion.set(notionId, motionTaskId);
+        this.motionToNotion.set(motionTaskId, notionId);
+      }
+    }
+    
+    return notionId;
   }
 
-  // Remove a mapping by Notion page ID
-  removeByNotionId(notionPageId) {
+  async removeByNotionId(notionPageId) {
+    // Remove from database
+    await database.removeMapping(notionPageId);
+    
+    // Remove from memory
     const motionTaskId = this.notionToMotion.get(notionPageId);
     if (motionTaskId) {
       this.notionToMotion.delete(notionPageId);
       this.motionToNotion.delete(motionTaskId);
-      logger.info('Mapping removed', { notionPageId, motionTaskId });
+      logger.debug('Mapping removed by Notion ID', { notionPageId, motionTaskId });
     }
   }
 
-  // Remove a mapping by Motion task ID
-  removeByMotionId(motionTaskId) {
+  async removeByMotionId(motionTaskId) {
     const notionPageId = this.motionToNotion.get(motionTaskId);
     if (notionPageId) {
-      this.motionToNotion.delete(motionTaskId);
+      // Remove from database
+      await database.removeMapping(notionPageId);
+      
+      // Remove from memory
       this.notionToMotion.delete(notionPageId);
-      logger.info('Mapping removed', { notionPageId, motionTaskId });
+      this.motionToNotion.delete(motionTaskId);
+      logger.debug('Mapping removed by Motion ID', { notionPageId, motionTaskId });
     }
   }
 
-  // Get cache statistics
-  getStats() {
+  async getStats() {
+    const dbStats = await database.getStats();
     return {
       totalMappings: this.notionToMotion.size,
-      notionIds: Array.from(this.notionToMotion.keys()),
-      motionIds: Array.from(this.motionToNotion.keys())
+      database: dbStats,
+      notionIds: Array.from(this.notionToMotion.keys()).slice(0, 5),
+      motionIds: Array.from(this.motionToNotion.keys()).slice(0, 5)
     };
-  }
-
-  // Initialize cache from existing data
-  async initialize(notionClient) {
-    try {
-      logger.info('Initializing mapping cache...');
-      
-      // Add timeout to prevent hanging
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Cache initialization timeout')), 30000)
-      );
-      
-      const queryPromise = notionClient.queryDatabase();
-      const notionTasks = await Promise.race([queryPromise, timeoutPromise]);
-      
-      let count = 0;
-      for (const task of notionTasks) {
-        if (task.id && task.motionTaskId) {
-          this.setMapping(task.id, task.motionTaskId);
-          count++;
-        }
-      }
-      
-      logger.info('Mapping cache initialized', { 
-        totalMappings: count,
-        totalNotionTasks: notionTasks.length 
-      });
-    } catch (error) {
-      logger.error('Failed to initialize mapping cache', { error: error.message });
-      // Cache will work but without pre-loaded mappings
-      // New mappings will be added as tasks sync
-    }
   }
 }
 

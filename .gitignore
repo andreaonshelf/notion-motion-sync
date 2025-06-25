@@ -8,3 +8,9 @@ build/
 .vscode/
 .idea/
 .vercel
+
+# Database
+sync.db
+sync.db-journal
+*.db
+*.db-journal
