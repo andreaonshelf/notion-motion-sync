@@ -111,12 +111,15 @@ const start = async () => {
         motionSync: `/sync/motion/:taskId`
       });
       
-      // Initialize mapping cache in the background (non-blocking)
+      // Initialize mapping cache and database
       mappingCache.initialize(notionClient).then(() => {
-        logger.info('Mapping cache initialized successfully');
+        logger.info('Mapping cache and database initialized successfully');
       }).catch(error => {
-        logger.error('Failed to initialize mapping cache', { error: error.message });
-        // Service continues running even if cache initialization fails
+        logger.error('Failed to initialize mapping cache/database', { 
+          error: error.message,
+          stack: error.stack 
+        });
+        // Service continues but database features won't work
       });
       
       // Start polling for Motion changes only (since Motion doesn't have webhooks)

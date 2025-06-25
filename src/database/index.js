@@ -10,9 +10,16 @@ class Database {
 
   async initialize() {
     try {
+      // Railway might need different path
+      const dbPath = process.env.RAILWAY_VOLUME_MOUNT_PATH 
+        ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'sync.db')
+        : path.join(__dirname, '../../sync.db');
+        
+      logger.info('Attempting to open database', { dbPath });
+      
       // Open database connection
       this.db = await open({
-        filename: path.join(__dirname, '../../sync.db'),
+        filename: dbPath,
         driver: sqlite3.Database
       });
 
@@ -26,7 +33,11 @@ class Database {
 
       logger.info('Database initialized successfully');
     } catch (error) {
-      logger.error('Database initialization failed', { error: error.message });
+      logger.error('Database initialization failed', { 
+        error: error.message,
+        code: error.code,
+        stack: error.stack 
+      });
       throw error;
     }
   }
