@@ -485,12 +485,7 @@ class DatabaseWrapper {
     await this.pool.query(`
       UPDATE sync_tasks 
       SET motion_sync_needed = true, 
-          motion_priority = 1,
-          motion_task_id = CASE 
-            WHEN motion_task_id IS NOT NULL AND motion_last_attempt IS NOT NULL AND motion_last_attempt > NOW() - INTERVAL '10 minutes' 
-            THEN NULL 
-            ELSE motion_task_id 
-          END
+          motion_priority = 1
       WHERE schedule_checkbox = true 
         AND motion_sync_needed = false
         AND (
