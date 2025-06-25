@@ -1,16 +1,15 @@
-const sqlite3 = require('sqlite3');
-const { open } = require('sqlite');
+const Database = require('better-sqlite3');
 const path = require('path');
 const logger = require('../utils/logger');
 
-class Database {
+class DatabaseWrapper {
   constructor() {
     this.db = null;
   }
 
-  async initialize() {
+  initialize() {
     try {
-      // Use in-memory database if file system is not available
+      // Use in-memory database for production to avoid file system issues
       const isProduction = process.env.NODE_ENV === 'production';
       const dbPath = isProduction ? ':memory:' : path.join(__dirname, '../../sync.db');
         
@@ -20,37 +19,47 @@ class Database {
         isProduction 
       });
       
+      // Try to load better-sqlite3
+      try {
+        const Database = require('better-sqlite3');
+        logger.info('better-sqlite3 module loaded successfully');
+      } catch (loadError) {
+        logger.error('Failed to load better-sqlite3', {
+          error: loadError.message,
+          code: loadError.code
+        });
+        throw new Error(`Cannot load better-sqlite3: ${loadError.message}`);
+      }
+      
       // Open database connection
-      this.db = await open({
-        filename: dbPath,
-        driver: sqlite3.Database
-      });
-
+      this.db = new Database(dbPath);
+      
       logger.info('Database connected');
 
       // Enable foreign keys
-      await this.db.exec('PRAGMA foreign_keys = ON');
+      this.db.exec('PRAGMA foreign_keys = ON');
 
       // Create tables if they don't exist
-      await this.createTables();
+      this.createTables();
       
       // Create indexes for performance
-      await this.createIndexes();
+      this.createIndexes();
 
       logger.info('Database initialized successfully');
     } catch (error) {
       logger.error('Database initialization failed', { 
         error: error.message,
         code: error.code,
-        stack: error.stack 
+        stack: error.stack,
+        name: error.name
       });
       throw error;
     }
   }
 
-  async createTables() {
+  createTables() {
     // Main sync tracking table
-    await this.db.exec(`
+    this.db.exec(`
       CREATE TABLE IF NOT EXISTS sync_tasks (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         notion_page_id TEXT UNIQUE NOT NULL,
@@ -70,20 +79,20 @@ class Database {
     `);
 
     // Sync history for debugging
-    await this.db.exec(`
+    this.db.exec(`
       CREATE TABLE IF NOT EXISTS sync_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         notion_page_id TEXT,
         motion_task_id TEXT,
         action TEXT,
-        changes JSON,
+        changes TEXT,
         error TEXT,
         timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
 
     // Add trigger to update updated_at
-    await this.db.exec(`
+    this.db.exec(`
       CREATE TRIGGER IF NOT EXISTS update_sync_tasks_timestamp 
       AFTER UPDATE ON sync_tasks
       BEGIN
@@ -92,23 +101,23 @@ class Database {
     `);
   }
 
-  async createIndexes() {
+  createIndexes() {
     // Index for finding tasks that need syncing
-    await this.db.exec(`
+    this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_sync_status 
       ON sync_tasks(sync_status, notion_last_edited, motion_last_synced);
     `);
 
     // Index for Motion ID lookups
-    await this.db.exec(`
+    this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_motion_id 
       ON sync_tasks(motion_task_id);
     `);
   }
 
   // Get or create a sync task record
-  async upsertSyncTask(notionPageId, data = {}) {
-    const sql = `
+  upsertSyncTask(notionPageId, data = {}) {
+    const stmt = this.db.prepare(`
       INSERT INTO sync_tasks (notion_page_id, notion_name, notion_last_edited)
       VALUES (?, ?, ?)
       ON CONFLICT(notion_page_id) DO UPDATE SET
@@ -116,20 +125,18 @@ class Database {
         notion_last_edited = excluded.notion_last_edited,
         updated_at = CURRENT_TIMESTAMP
       RETURNING *;
-    `;
+    `);
     
-    const result = await this.db.get(sql, [
+    return stmt.get(
       notionPageId,
       data.name || null,
       data.lastEdited || null
-    ]);
-    
-    return result;
+    );
   }
 
   // Update Motion task ID after creation
-  async setMotionTaskId(notionPageId, motionTaskId) {
-    const sql = `
+  setMotionTaskId(notionPageId, motionTaskId) {
+    const stmt = this.db.prepare(`
       UPDATE sync_tasks 
       SET motion_task_id = ?, 
           sync_status = 'synced',
@@ -137,14 +144,14 @@ class Database {
           error_message = NULL,
           error_count = 0
       WHERE notion_page_id = ?;
-    `;
+    `);
     
-    await this.db.run(sql, [motionTaskId, notionPageId]);
+    stmt.run(motionTaskId, notionPageId);
   }
 
   // Get tasks that need syncing
-  async getTasksNeedingSync(limit = 10) {
-    const sql = `
+  getTasksNeedingSync(limit = 10) {
+    const stmt = this.db.prepare(`
       SELECT * FROM sync_tasks
       WHERE (
         -- New tasks without Motion ID
@@ -163,14 +170,14 @@ class Database {
         END ASC,
         notion_last_edited DESC
       LIMIT ?;
-    `;
+    `);
     
-    return await this.db.all(sql, [limit]);
+    return stmt.all(limit);
   }
 
   // Lock a task for syncing
-  async lockTaskForSync(id, lockMinutes = 2) {
-    const sql = `
+  lockTaskForSync(id, lockMinutes = 2) {
+    const stmt = this.db.prepare(`
       UPDATE sync_tasks 
       SET sync_status = 'syncing',
           sync_lock_until = datetime('now', '+' || ? || ' minutes')
@@ -178,15 +185,15 @@ class Database {
         sync_status != 'syncing' 
         OR sync_lock_until < datetime('now')
       );
-    `;
+    `);
     
-    const result = await this.db.run(sql, [lockMinutes, id]);
+    const result = stmt.run(lockMinutes, id);
     return result.changes > 0;
   }
 
   // Mark sync successful
-  async markSyncSuccess(id, motionTaskId, duration, dueDate) {
-    const sql = `
+  markSyncSuccess(id, motionTaskId, duration, dueDate) {
+    const stmt = this.db.prepare(`
       UPDATE sync_tasks 
       SET sync_status = 'synced',
           motion_task_id = ?,
@@ -197,68 +204,68 @@ class Database {
           error_count = 0,
           sync_lock_until = NULL
       WHERE id = ?;
-    `;
+    `);
     
-    await this.db.run(sql, [motionTaskId, duration, dueDate, id]);
+    stmt.run(motionTaskId, duration, dueDate, id);
   }
 
   // Mark sync failed
-  async markSyncError(id, errorMessage) {
-    const sql = `
+  markSyncError(id, errorMessage) {
+    const stmt = this.db.prepare(`
       UPDATE sync_tasks 
       SET sync_status = 'error',
           error_message = ?,
           error_count = error_count + 1,
           sync_lock_until = NULL
       WHERE id = ?;
-    `;
+    `);
     
-    await this.db.run(sql, [errorMessage, id]);
+    stmt.run(errorMessage, id);
   }
 
   // Log sync history
-  async logSync(notionPageId, motionTaskId, action, changes = null, error = null) {
-    const sql = `
+  logSync(notionPageId, motionTaskId, action, changes = null, error = null) {
+    const stmt = this.db.prepare(`
       INSERT INTO sync_history (notion_page_id, motion_task_id, action, changes, error)
       VALUES (?, ?, ?, ?, ?);
-    `;
+    `);
     
-    await this.db.run(sql, [
+    stmt.run(
       notionPageId,
       motionTaskId,
       action,
       changes ? JSON.stringify(changes) : null,
       error
-    ]);
+    );
   }
 
   // Get mapping by Notion ID
-  async getMappingByNotionId(notionPageId) {
-    return await this.db.get(
-      'SELECT * FROM sync_tasks WHERE notion_page_id = ?',
-      [notionPageId]
+  getMappingByNotionId(notionPageId) {
+    const stmt = this.db.prepare(
+      'SELECT * FROM sync_tasks WHERE notion_page_id = ?'
     );
+    return stmt.get(notionPageId);
   }
 
   // Get mapping by Motion ID
-  async getMappingByMotionId(motionTaskId) {
-    return await this.db.get(
-      'SELECT * FROM sync_tasks WHERE motion_task_id = ?',
-      [motionTaskId]
+  getMappingByMotionId(motionTaskId) {
+    const stmt = this.db.prepare(
+      'SELECT * FROM sync_tasks WHERE motion_task_id = ?'
     );
+    return stmt.get(motionTaskId);
   }
 
   // Remove mapping
-  async removeMapping(notionPageId) {
-    await this.db.run(
-      'DELETE FROM sync_tasks WHERE notion_page_id = ?',
-      [notionPageId]
+  removeMapping(notionPageId) {
+    const stmt = this.db.prepare(
+      'DELETE FROM sync_tasks WHERE notion_page_id = ?'
     );
+    stmt.run(notionPageId);
   }
 
   // Get statistics
-  async getStats() {
-    const stats = await this.db.get(`
+  getStats() {
+    const stmt = this.db.prepare(`
       SELECT 
         COUNT(*) as total,
         COUNT(motion_task_id) as synced,
@@ -268,15 +275,33 @@ class Database {
       FROM sync_tasks;
     `);
     
-    return stats;
+    return stmt.get();
   }
 
-  async close() {
+  // Get all rows - for better-sqlite3 compatibility
+  all(sql, params = []) {
+    const stmt = this.db.prepare(sql);
+    return stmt.all(...params);
+  }
+
+  // Get single row
+  get(sql, params = []) {
+    const stmt = this.db.prepare(sql);
+    return stmt.get(...params);
+  }
+
+  // Run statement
+  run(sql, params = []) {
+    const stmt = this.db.prepare(sql);
+    return stmt.run(...params);
+  }
+
+  close() {
     if (this.db) {
-      await this.db.close();
+      this.db.close();
       logger.info('Database connection closed');
     }
   }
 }
 
-module.exports = new Database();
+module.exports = new DatabaseWrapper();

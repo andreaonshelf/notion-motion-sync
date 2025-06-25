@@ -98,6 +98,22 @@ const start = async () => {
   try {
     validateConfig();
     
+    // Initialize database and mapping cache BEFORE starting server
+    logger.info('Initializing database and mapping cache...');
+    try {
+      await mappingCache.initialize(notionClient);
+      logger.info('Database and mapping cache initialized successfully');
+    } catch (error) {
+      logger.error('CRITICAL: Failed to initialize database', { 
+        error: error.message,
+        stack: error.stack,
+        name: error.name,
+        code: error.code
+      });
+      // For now, continue without database to keep service running
+      logger.warn('Service will continue without database functionality');
+    }
+    
     const port = config.port;
     app.listen(port, () => {
       logger.info('Server started', { port });
@@ -109,17 +125,6 @@ const start = async () => {
         fullSync: `/sync/full`,
         notionSync: `/sync/notion/:pageId`,
         motionSync: `/sync/motion/:taskId`
-      });
-      
-      // Initialize mapping cache and database
-      mappingCache.initialize(notionClient).then(() => {
-        logger.info('Mapping cache and database initialized successfully');
-      }).catch(error => {
-        logger.error('Failed to initialize mapping cache/database', { 
-          error: error.message,
-          stack: error.stack 
-        });
-        // Service continues but database features won't work
       });
       
       // Start polling for Motion changes only (since Motion doesn't have webhooks)
