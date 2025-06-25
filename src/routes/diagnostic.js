@@ -45,6 +45,23 @@ router.get('/notion-tasks', async (req, res) => {
   }
 });
 
+router.get('/config-check', async (req, res) => {
+  const { config } = require('../config');
+  res.json({
+    motion: {
+      hasApiKey: !!config.motion.apiKey,
+      apiKeyLength: config.motion.apiKey ? config.motion.apiKey.length : 0,
+      workspaceId: config.motion.workspaceId,
+      apiUrl: config.motion.apiUrl
+    },
+    notion: {
+      hasApiKey: !!config.notion.apiKey,
+      hasDatabaseId: !!config.notion.databaseId
+    },
+    environment: process.env.NODE_ENV
+  });
+});
+
 router.get('/motion-sync-status', async (req, res) => {
   try {
     // Get Motion tasks
@@ -637,6 +654,78 @@ router.get('/verify-phantom-ids', async (req, res) => {
     });
   } catch (error) {
     logger.error('Error verifying phantom IDs', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/test-workspace-creation', async (req, res) => {
+  try {
+    const { config } = require('../config');
+    const testName = `Workspace Test ${Date.now()}`;
+    
+    // Test 1: Create with configured workspace
+    let withWorkspace = null;
+    try {
+      const payload1 = {
+        name: testName + ' - With WS',
+        workspaceId: config.motion.workspaceId,
+        duration: 60,
+        dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+      };
+      
+      const response1 = await motionClient.client.post('/tasks', payload1);
+      withWorkspace = response1.data;
+    } catch (e) {
+      withWorkspace = { error: e.message };
+    }
+    
+    // Test 2: Create without workspace
+    let withoutWorkspace = null;
+    try {
+      const payload2 = {
+        name: testName + ' - No WS',
+        duration: 60,
+        dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+      };
+      
+      const response2 = await motionClient.client.post('/tasks', payload2);
+      withoutWorkspace = response2.data;
+    } catch (e) {
+      withoutWorkspace = { error: e.message };
+    }
+    
+    // Clean up if created
+    const cleanup = [];
+    if (withWorkspace && withWorkspace.id) {
+      try {
+        await motionClient.deleteTask(withWorkspace.id);
+        cleanup.push('withWorkspace');
+      } catch (e) {}
+    }
+    if (withoutWorkspace && withoutWorkspace.id) {
+      try {
+        await motionClient.deleteTask(withoutWorkspace.id);
+        cleanup.push('withoutWorkspace');
+      } catch (e) {}
+    }
+    
+    res.json({
+      configuredWorkspaceId: config.motion.workspaceId,
+      withWorkspace: {
+        success: !withWorkspace.error,
+        id: withWorkspace.id,
+        returnedWorkspaceId: withWorkspace.workspaceId,
+        error: withWorkspace.error
+      },
+      withoutWorkspace: {
+        success: !withoutWorkspace.error,
+        id: withoutWorkspace.id,
+        returnedWorkspaceId: withoutWorkspace.workspaceId,
+        error: withoutWorkspace.error
+      },
+      cleanedUp: cleanup
+    });
+  } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });

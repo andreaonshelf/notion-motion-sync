@@ -143,17 +143,18 @@ class SyncService {
             });
           }
         } catch (verifyError) {
-          logger.error('Motion task creation verification failed - possible phantom ID', {
+          logger.error('Motion API BUG: Returned task ID but task does not exist', {
             notionPageId,
-            motionTaskId: motionTask.id,
+            phantomMotionId: motionTask.id,
             taskName: notionTask.name,
             hasDuration: !!notionTask.duration,
             hasDueDate: !!notionTask.dueDate,
             duration: notionTask.duration,
             dueDate: notionTask.dueDate,
-            error: verifyError.message
+            error: verifyError.message,
+            explanation: 'Motion API returned a task ID but the task was never created. This is a known Motion API issue with tasks that have both duration and due date.'
           });
-          throw new Error(`Motion task creation failed: ${verifyError.message}`);
+          throw new Error(`Motion API phantom ID bug: Task ${motionTask.id} was never created despite API returning success`);
         }
         
         await notionClient.updateTask(notionPageId, {
