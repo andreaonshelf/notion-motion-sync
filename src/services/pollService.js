@@ -1,6 +1,5 @@
 const notionClient = require('./notionClient');
 const motionClient = require('./motionClient');
-const syncService = require('./syncService');
 const database = require('../database');
 const logger = require('../utils/logger');
 
@@ -204,14 +203,39 @@ class PollService {
           
         } catch (error) {
           logger.error(`Failed Motion operation for: ${task.notion_name}`, {
-            error: error.message
+            error: error.message,
+            statusCode: error.response?.status,
+            operation: task.schedule_checkbox ? (task.motion_task_id ? 'UPDATE' : 'CREATE') : 'DELETE'
           });
           
-          // Mark as failed, will retry later
-          await database.pool.query(
-            'UPDATE sync_tasks SET motion_last_attempt = CURRENT_TIMESTAMP WHERE notion_page_id = $1',
-            [task.notion_page_id]
-          );
+          // Handle different error types
+          if (error.response?.status === 429) {
+            // Rate limited - wait longer before retry
+            logger.warn('Motion API rate limited, extending retry delay');
+            await database.pool.query(
+              'UPDATE sync_tasks SET motion_last_attempt = CURRENT_TIMESTAMP + INTERVAL \'10 minutes\' WHERE notion_page_id = $1',
+              [task.notion_page_id]
+            );
+          } else if (error.response?.status === 404 && task.motion_task_id) {
+            // Motion task doesn't exist - clear the phantom ID
+            logger.warn('Motion task not found, clearing phantom ID', { 
+              motionTaskId: task.motion_task_id 
+            });
+            await database.completeMotionSync(task.notion_page_id, null);
+          } else if (error.response?.status >= 500) {
+            // Server error - retry with exponential backoff
+            logger.warn('Motion API server error, will retry with backoff');
+            await database.pool.query(
+              'UPDATE sync_tasks SET motion_last_attempt = CURRENT_TIMESTAMP + INTERVAL \'5 minutes\' WHERE notion_page_id = $1',
+              [task.notion_page_id]
+            );
+          } else {
+            // Other errors - normal retry
+            await database.pool.query(
+              'UPDATE sync_tasks SET motion_last_attempt = CURRENT_TIMESTAMP WHERE notion_page_id = $1',
+              [task.notion_page_id]
+            );
+          }
         }
       }
       
@@ -238,8 +262,27 @@ class PollService {
       
       const motionTask = await motionClient.createTask(motionTaskData);
       
-      // Verify task was created
-      await motionClient.getTask(motionTask.id);
+      // Verify task was created (with retry on verification failure)
+      let verificationRetries = 3;
+      let taskVerified = false;
+      
+      while (verificationRetries > 0 && !taskVerified) {
+        try {
+          await motionClient.getTask(motionTask.id);
+          taskVerified = true;
+        } catch (verifyError) {
+          verificationRetries--;
+          if (verificationRetries > 0) {
+            logger.warn(`Task verification failed, retrying... (${verificationRetries} attempts left)`, {
+              motionTaskId: motionTask.id,
+              error: verifyError.message
+            });
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          } else {
+            throw new Error(`Task verification failed after 3 attempts: ${verifyError.message}`);
+          }
+        }
+      }
       
       // Update database with Motion ID and mark for Notion sync
       await database.completeMotionSync(task.notion_page_id, motionTask.id);
