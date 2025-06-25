@@ -245,15 +245,36 @@ class PollService {
       );
       const trackedSet = new Set(trackedMotionIds.map(r => r.motion_task_id));
       
-      // Find orphans
-      const orphans = motionTasks.filter(task => !trackedSet.has(task.id));
+      // Get all Motion IDs from Notion (including those not in database yet)
+      const notionTasks = await notionClient.queryDatabase();
+      const notionMotionIds = new Set(
+        notionTasks
+          .filter(task => task.motionTaskId)
+          .map(task => task.motionTaskId)
+      );
       
-      if (orphans.length > 0) {
-        logger.info(`Found ${orphans.length} orphaned Motion tasks`);
+      // Find orphans - tasks that are in Motion but NOT in database AND NOT in Notion
+      const orphans = motionTasks.filter(task => 
+        !trackedSet.has(task.id) && !notionMotionIds.has(task.id)
+      );
+      
+      // Additional safety: only delete tasks older than 5 minutes
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+      const safeOrphans = orphans.filter(task => {
+        const createdTime = new Date(task.createdTime || task.updatedTime);
+        return createdTime < fiveMinutesAgo;
+      });
+      
+      if (safeOrphans.length > 0) {
+        logger.info(`Found ${safeOrphans.length} orphaned Motion tasks (older than 5 minutes)`);
         
-        for (const orphan of orphans) {
+        for (const orphan of safeOrphans) {
           try {
-            logger.info(`Deleting orphaned Motion task: ${orphan.name}`);
+            logger.info(`Deleting orphaned Motion task: ${orphan.name}`, {
+              id: orphan.id,
+              created: orphan.createdTime,
+              age: `${Math.round((Date.now() - new Date(orphan.createdTime).getTime()) / 60000)} minutes`
+            });
             await motionClient.deleteTask(orphan.id);
             
             // Log deletion

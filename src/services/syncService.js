@@ -124,9 +124,6 @@ class SyncService {
         
         // Verify the task was actually created in Motion
         try {
-          // Add small delay for Motion API eventual consistency
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          
           const verifyTask = await motionClient.getTask(motionTask.id);
           if (!verifyTask || verifyTask.id !== motionTask.id) {
             throw new Error('Motion task verification failed - task not found after creation');
