@@ -311,6 +311,10 @@ router.get('/database-stats', async (req, res) => {
 
 router.get('/sync-history/:pageId?', async (req, res) => {
   try {
+    if (!database.db) {
+      return res.status(503).json({ error: 'Database not initialized' });
+    }
+    
     const { pageId } = req.params;
     let history;
     
@@ -340,6 +344,10 @@ router.get('/sync-history/:pageId?', async (req, res) => {
 
 router.get('/database-errors', async (req, res) => {
   try {
+    if (!database.db) {
+      return res.status(503).json({ error: 'Database not initialized' });
+    }
+    
     const errors = await database.db.all(`
       SELECT * FROM sync_tasks 
       WHERE sync_status = 'error' 

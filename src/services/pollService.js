@@ -198,6 +198,11 @@ class PollService {
       const motionTasks = motionResponse.tasks || [];
       
       // Get all Motion IDs we're tracking
+      if (!database.db) {
+        logger.warn('Database not initialized, skipping orphan cleanup');
+        return;
+      }
+      
       const trackedMotionIds = await database.db.all(
         'SELECT motion_task_id FROM sync_tasks WHERE motion_task_id IS NOT NULL'
       );

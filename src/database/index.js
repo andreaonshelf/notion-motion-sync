@@ -1,4 +1,4 @@
-const sqlite3 = require('sqlite3').verbose();
+const sqlite3 = require('sqlite3');
 const { open } = require('sqlite');
 const path = require('path');
 const logger = require('../utils/logger');
@@ -10,12 +10,15 @@ class Database {
 
   async initialize() {
     try {
-      // Railway might need different path
-      const dbPath = process.env.RAILWAY_VOLUME_MOUNT_PATH 
-        ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'sync.db')
-        : path.join(__dirname, '../../sync.db');
+      // Use in-memory database if file system is not available
+      const isProduction = process.env.NODE_ENV === 'production';
+      const dbPath = isProduction ? ':memory:' : path.join(__dirname, '../../sync.db');
         
-      logger.info('Attempting to open database', { dbPath });
+      logger.info('Opening database', { 
+        dbPath,
+        environment: process.env.NODE_ENV,
+        isProduction 
+      });
       
       // Open database connection
       this.db = await open({
@@ -24,6 +27,9 @@ class Database {
       });
 
       logger.info('Database connected');
+
+      // Enable foreign keys
+      await this.db.exec('PRAGMA foreign_keys = ON');
 
       // Create tables if they don't exist
       await this.createTables();
