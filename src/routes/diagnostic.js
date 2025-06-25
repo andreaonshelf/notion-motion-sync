@@ -939,6 +939,68 @@ router.post('/clear-motion-ids', async (req, res) => {
   }
 });
 
+router.post('/update-motion-ids', async (req, res) => {
+  try {
+    const { updates } = req.body;
+    
+    if (!updates || !Array.isArray(updates) || updates.length === 0) {
+      return res.status(400).json({ error: 'updates array is required' });
+    }
+    
+    logger.info('Manually updating Motion IDs', { count: updates.length });
+    
+    const results = [];
+    
+    for (const update of updates) {
+      const { notionPageId, motionTaskId, taskName } = update;
+      
+      try {
+        // Update in database
+        await database.pool.query(`
+          UPDATE sync_tasks 
+          SET motion_task_id = $1,
+              motion_sync_needed = false,
+              sync_status = 'synced',
+              motion_last_synced = CURRENT_TIMESTAMP,
+              notion_sync_needed = true
+          WHERE notion_page_id = $2
+        `, [motionTaskId, notionPageId]);
+        
+        // Update in Notion
+        await notionClient.updateTask(notionPageId, { motionTaskId });
+        
+        results.push({
+          success: true,
+          notionPageId,
+          motionTaskId,
+          taskName
+        });
+        
+        logger.info(`Updated Motion ID for ${taskName}`, { notionPageId, motionTaskId });
+        
+      } catch (error) {
+        results.push({
+          success: false,
+          notionPageId,
+          taskName,
+          error: error.message
+        });
+        logger.error(`Failed to update Motion ID for ${taskName}`, { error: error.message });
+      }
+    }
+    
+    res.json({
+      success: true,
+      totalUpdated: results.filter(r => r.success).length,
+      results
+    });
+    
+  } catch (error) {
+    logger.error('Error updating Motion IDs', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.get('/scheduled-tasks-state', async (req, res) => {
   try {
     logger.info('Checking scheduled tasks state...');
