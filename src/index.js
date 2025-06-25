@@ -9,6 +9,7 @@ const syncRoutes = require('./routes/sync');
 const testRoutes = require('./routes/test');
 const diagnosticRoutes = require('./routes/diagnostic');
 const debugRoutes = require('./routes/debug');
+const manualSyncRoutes = require('./routes/diagnostic-manual-sync');
 const pollService = require('./services/pollService');
 const mappingCache = require('./services/mappingCache');
 const notionClient = require('./services/notionClient');
@@ -87,6 +88,7 @@ app.use('/sync', syncRoutes);
 app.use('/test', testRoutes);
 app.use('/diagnostic', diagnosticRoutes);
 app.use('/debug', debugRoutes);
+app.use('/manual', manualSyncRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ error: 'Not found' });
