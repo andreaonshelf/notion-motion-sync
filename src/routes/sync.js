@@ -68,8 +68,7 @@ router.get('/poll-status', (req, res) => {
   const isRunning = pollService.pollInterval !== null;
   res.json({
     pollServiceRunning: isRunning,
-    lastSyncCount: pollService.lastSyncTimes.size,
-    checksumCount: pollService.motionTaskChecksums.size
+    intervalMinutes: 3
   });
 });
 

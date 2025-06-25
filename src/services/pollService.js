@@ -31,19 +31,23 @@ class PollService {
 
   async pollForChanges() {
     try {
-      logger.info('Polling for changes...');
+      logger.info('=== POLL CYCLE START ===');
       
       // Step 1: Update database with latest Notion data
+      logger.info('Step 1: Updating Notion data...');
       await this.updateNotionData();
       
       // Step 2: Sync only tasks that need it
+      logger.info('Step 2: Syncing changed tasks...');
       await this.syncChangedTasks();
       
       // Step 3: Clean up orphaned Motion tasks
+      logger.info('Step 3: Cleaning up orphaned tasks...');
       await this.cleanupOrphanedMotionTasks();
       
+      logger.info('=== POLL CYCLE END ===');
     } catch (error) {
-      logger.error('Error during polling', { error: error.message });
+      logger.error('Error during polling', { error: error.message, stack: error.stack });
     }
   }
   

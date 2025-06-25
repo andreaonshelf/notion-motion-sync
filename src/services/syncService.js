@@ -158,30 +158,21 @@ class SyncService {
 
   async performFullSync() {
     try {
-      logger.info('Starting full sync');
+      logger.info('Starting full sync using database approach');
       
-      const notionTasks = await notionClient.queryDatabase();
-      let successCount = 0;
-      let errorCount = 0;
+      // Just trigger the poll service methods which use the database
+      const pollService = require('./pollService');
       
-      for (const task of notionTasks) {
-        try {
-          await this.syncNotionToMotion(task.id);
-          successCount++;
-        } catch (error) {
-          logger.error('Failed to sync task', { 
-            taskName: task.name, 
-            error: error.message 
-          });
-          errorCount++;
-        }
-      }
+      // Update Notion data in database
+      await pollService.updateNotionData();
       
-      logger.info('Full sync completed', { 
-        total: notionTasks.length,
-        success: successCount,
-        errors: errorCount
-      });
+      // Sync only changed tasks
+      await pollService.syncChangedTasks();
+      
+      // Clean up orphaned Motion tasks
+      await pollService.cleanupOrphanedMotionTasks();
+      
+      logger.info('Full sync completed using smart sync');
     } catch (error) {
       logger.error('Error during full sync', { error: error.message });
       throw error;
@@ -190,38 +181,21 @@ class SyncService {
 
   async syncAllMotionTasks() {
     try {
-      logger.info('Starting Motion to Notion sync');
+      logger.info('Starting Motion to Notion sync using database approach');
       
-      const motionResponse = await motionClient.listTasks();
-      const motionTasks = motionResponse.tasks || [];
-      let successCount = 0;
-      let errorCount = 0;
+      // Just trigger the poll service methods which use the database
+      const pollService = require('./pollService');
       
-      for (const task of motionTasks) {
-        try {
-          await this.syncMotionToNotion(task.id);
-          successCount++;
-          // Add delay to avoid rate limits (Motion allows ~1 request per second)
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        } catch (error) {
-          logger.error('Failed to sync Motion task', { 
-            taskName: task.name, 
-            error: error.message 
-          });
-          errorCount++;
-          // If rate limited, wait much longer
-          if (error.message.includes('429') || error.message.includes('Rate limit')) {
-            logger.info('Rate limited, waiting 10 seconds...');
-            await new Promise(resolve => setTimeout(resolve, 10000));
-          }
-        }
-      }
+      // Update Notion data in database
+      await pollService.updateNotionData();
       
-      logger.info('Motion to Notion sync completed', { 
-        total: motionTasks.length,
-        success: successCount,
-        errors: errorCount
-      });
+      // Sync only changed tasks
+      await pollService.syncChangedTasks();
+      
+      // Clean up orphaned Motion tasks
+      await pollService.cleanupOrphanedMotionTasks();
+      
+      logger.info('Motion to Notion sync completed using smart sync');
     } catch (error) {
       logger.error('Error during Motion to Notion sync', { error: error.message });
       throw error;
