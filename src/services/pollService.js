@@ -97,7 +97,8 @@ class PollService {
           schedule: task.schedule,
           duration: task.duration,
           dueDate: task.dueDate,
-          status: task.status
+          status: task.status,
+          priority: task.priority
         });
         
         // Handle Motion ID based on schedule status
@@ -260,7 +261,8 @@ class PollService {
         name: task.notion_name,
         duration: task.duration,
         dueDate: task.due_date,
-        status: 'Not started'
+        status: 'Not started',
+        priority: task.priority
       };
       
       const motionTask = await motionClient.createTask(motionTaskData);
@@ -301,6 +303,11 @@ class PollService {
         duration: task.duration,
         dueDate: task.due_date
       };
+      
+      // Only add priority if it exists
+      if (task.priority) {
+        updateData.priority = task.priority;
+      }
       
       await motionClient.updateTask(task.motion_task_id, updateData);
       

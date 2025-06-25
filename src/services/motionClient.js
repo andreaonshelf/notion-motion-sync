@@ -139,17 +139,35 @@ class MotionClient {
 
   async updateTask(taskId, taskData) {
     try {
-      const updatePayload = {
-        name: taskData.name,
-        description: taskData.description,
-        dueDate: taskData.dueDate,
-        priority: this.mapPriority(taskData.priority),
-        status: this.mapStatus(taskData.status),
-        labels: taskData.labels || []
-      };
+      const updatePayload = {};
+      
+      // Only include fields that are provided
+      if (taskData.name !== undefined) {
+        updatePayload.name = taskData.name;
+      }
+      
+      if (taskData.description !== undefined) {
+        updatePayload.description = taskData.description;
+      }
+      
+      if (taskData.dueDate !== undefined) {
+        updatePayload.dueDate = taskData.dueDate;
+      }
+      
+      if (taskData.priority !== undefined) {
+        updatePayload.priority = this.mapPriority(taskData.priority);
+      }
+      
+      if (taskData.status !== undefined) {
+        updatePayload.status = this.mapStatus(taskData.status);
+      }
+      
+      if (taskData.labels !== undefined) {
+        updatePayload.labels = taskData.labels || [];
+      }
       
       // Only add duration if specified (in minutes)
-      if (taskData.duration) {
+      if (taskData.duration !== undefined) {
         // Ensure duration is a number, not a string
         const durationValue = parseInt(taskData.duration);
         if (!isNaN(durationValue) && durationValue > 0) {
