@@ -113,6 +113,17 @@ class MotionClient {
         throw new Error('Motion API returned success but no task ID');
       }
       
+      // Log the full response for tasks with duration + date
+      if (payload.duration && payload.dueDate) {
+        logger.info('Motion API response for duration+date task', {
+          taskId: response.data.id,
+          status: response.status,
+          headers: response.headers,
+          data: response.data,
+          payload: payload
+        });
+      }
+      
       logger.info('Task created in Motion', { taskId: response.data.id });
       return response.data;
     } catch (error) {

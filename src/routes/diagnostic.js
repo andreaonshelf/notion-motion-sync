@@ -641,4 +641,46 @@ router.get('/verify-phantom-ids', async (req, res) => {
   }
 });
 
+router.get('/check-phantom/:motionId', async (req, res) => {
+  try {
+    const { motionId } = req.params;
+    logger.info('Checking phantom Motion ID', { motionId });
+    
+    // Try to get the task with the configured workspace
+    let withWorkspace = null;
+    try {
+      const response = await motionClient.listTasks({ workspaceId: require('../config').config.motion.workspaceId });
+      withWorkspace = response.tasks.find(t => t.id === motionId);
+    } catch (e) {}
+    
+    // Try to get the task without workspace filter
+    let withoutWorkspace = null;
+    try {
+      const response = await motionClient.listTasks({});
+      withoutWorkspace = response.tasks.find(t => t.id === motionId);
+    } catch (e) {}
+    
+    // Try direct GET
+    let directGet = null;
+    let directGetError = null;
+    try {
+      directGet = await motionClient.getTask(motionId);
+    } catch (e) {
+      directGetError = e.response?.status || e.message;
+    }
+    
+    res.json({
+      motionId,
+      foundWithWorkspaceFilter: !!withWorkspace,
+      foundWithoutWorkspaceFilter: !!withoutWorkspace,
+      foundWithDirectGet: !!directGet,
+      directGetError,
+      taskDetails: directGet || withoutWorkspace || withWorkspace || null,
+      configuredWorkspace: require('../config').config.motion.workspaceId
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;

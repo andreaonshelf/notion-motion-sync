@@ -99,6 +99,13 @@ class SyncService {
       } else {
         // No Motion ID stored in Notion, create new task
         const enhancedDescription = this.enhanceDescriptionWithAttachments(notionTask);
+        logger.info('About to create Motion task', {
+          name: notionTask.name,
+          hasDuration: !!notionTask.duration,
+          duration: notionTask.duration,
+          dueDate: notionTask.dueDate
+        });
+        
         const motionTask = await motionClient.createTask({
           name: notionTask.name,
           description: enhancedDescription,
@@ -108,8 +115,18 @@ class SyncService {
           duration: notionTask.duration
         });
         
+        logger.info('Motion API returned task', {
+          returnedId: motionTask.id,
+          returnedName: motionTask.name,
+          returnedWorkspaceId: motionTask.workspaceId,
+          fullResponse: JSON.stringify(motionTask)
+        });
+        
         // Verify the task was actually created in Motion
         try {
+          // Add small delay for Motion API eventual consistency
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
           const verifyTask = await motionClient.getTask(motionTask.id);
           if (!verifyTask || verifyTask.id !== motionTask.id) {
             throw new Error('Motion task verification failed - task not found after creation');
