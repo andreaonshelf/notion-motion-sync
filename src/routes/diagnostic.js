@@ -734,18 +734,35 @@ router.post('/clear-phantom-ids', async (req, res) => {
     const validMotionIds = new Set(motionTasks.map(t => t.id));
     
     // Clear any Motion IDs that don't exist in Motion
-    const result = await database.pool.query(`
-      UPDATE sync_tasks 
-      SET motion_task_id = NULL,
-          motion_sync_needed = true,
-          motion_priority = 1,
-          motion_last_attempt = NULL,
-          sync_status = 'pending',
-          notion_sync_needed = true
-      WHERE motion_task_id IS NOT NULL
-        AND motion_task_id NOT IN (${Array.from(validMotionIds).map((_, i) => `$${i + 1}`).join(',')})
-      RETURNING notion_name, motion_task_id
-    `, Array.from(validMotionIds));
+    let result;
+    if (validMotionIds.size === 0) {
+      // If there are no valid Motion IDs, clear ALL Motion IDs
+      result = await database.pool.query(`
+        UPDATE sync_tasks 
+        SET motion_task_id = NULL,
+            motion_sync_needed = true,
+            motion_priority = 1,
+            motion_last_attempt = NULL,
+            sync_status = 'pending',
+            notion_sync_needed = true
+        WHERE motion_task_id IS NOT NULL
+        RETURNING notion_name, motion_task_id
+      `);
+    } else {
+      // Clear only invalid Motion IDs
+      result = await database.pool.query(`
+        UPDATE sync_tasks 
+        SET motion_task_id = NULL,
+            motion_sync_needed = true,
+            motion_priority = 1,
+            motion_last_attempt = NULL,
+            sync_status = 'pending',
+            notion_sync_needed = true
+        WHERE motion_task_id IS NOT NULL
+          AND motion_task_id NOT IN (${Array.from(validMotionIds).map((_, i) => `$${i + 1}`).join(',')})
+        RETURNING notion_name, motion_task_id
+      `, Array.from(validMotionIds));
+    }
     
     res.json({
       success: true,
