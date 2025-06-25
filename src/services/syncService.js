@@ -114,10 +114,26 @@ class SyncService {
           if (!verifyTask || verifyTask.id !== motionTask.id) {
             throw new Error('Motion task verification failed - task not found after creation');
           }
+          
+          // Log successful creation with duration/date tasks
+          if (notionTask.duration && notionTask.dueDate) {
+            logger.info('Successfully created Motion task with duration + date', {
+              notionPageId,
+              motionTaskId: motionTask.id,
+              name: notionTask.name,
+              duration: notionTask.duration,
+              dueDate: notionTask.dueDate
+            });
+          }
         } catch (verifyError) {
-          logger.error('Motion task creation verification failed', {
+          logger.error('Motion task creation verification failed - possible phantom ID', {
             notionPageId,
             motionTaskId: motionTask.id,
+            taskName: notionTask.name,
+            hasDuration: !!notionTask.duration,
+            hasDueDate: !!notionTask.dueDate,
+            duration: notionTask.duration,
+            dueDate: notionTask.dueDate,
             error: verifyError.message
           });
           throw new Error(`Motion task creation failed: ${verifyError.message}`);

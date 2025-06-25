@@ -487,6 +487,114 @@ router.post('/fix-broken-motion-ids', async (req, res) => {
   }
 });
 
+router.post('/test-motion-create', async (req, res) => {
+  try {
+    const testName = `Test Task ${new Date().toISOString()}`;
+    logger.info('Testing Motion task creation', { testName });
+    
+    // Test 1: Create without duration
+    const task1 = await motionClient.createTask({
+      name: testName + ' - No Duration',
+      description: 'Test task without duration',
+      status: 'Not started',
+      priority: 'Medium'
+    });
+    
+    // Verify it exists
+    let task1Exists = false;
+    try {
+      await motionClient.getTask(task1.id);
+      task1Exists = true;
+    } catch (e) {
+      task1Exists = false;
+    }
+    
+    // Test 2: Create with duration
+    const task2 = await motionClient.createTask({
+      name: testName + ' - With Duration',
+      description: 'Test task with duration',
+      status: 'Not started',
+      priority: 'Medium',
+      duration: 60
+    });
+    
+    // Verify it exists
+    let task2Exists = false;
+    try {
+      await motionClient.getTask(task2.id);
+      task2Exists = true;
+    } catch (e) {
+      task2Exists = false;
+    }
+    
+    // Test 3: Create with duration AND due date
+    const task3 = await motionClient.createTask({
+      name: testName + ' - Duration + Date',
+      description: 'Test task with duration and due date',
+      status: 'Not started',
+      priority: 'Medium',
+      duration: 60,
+      dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+    });
+    
+    // Verify it exists
+    let task3Exists = false;
+    try {
+      await motionClient.getTask(task3.id);
+      task3Exists = true;
+    } catch (e) {
+      task3Exists = false;
+    }
+    
+    // Clean up - delete test tasks if they exist
+    const cleanup = [];
+    if (task1Exists) {
+      try {
+        await motionClient.deleteTask(task1.id);
+        cleanup.push('task1');
+      } catch (e) {}
+    }
+    if (task2Exists) {
+      try {
+        await motionClient.deleteTask(task2.id);
+        cleanup.push('task2');
+      } catch (e) {}
+    }
+    if (task3Exists) {
+      try {
+        await motionClient.deleteTask(task3.id);
+        cleanup.push('task3');
+      } catch (e) {}
+    }
+    
+    res.json({
+      success: true,
+      results: {
+        noDuration: {
+          id: task1.id,
+          created: task1Exists,
+          isPhantom: !task1Exists
+        },
+        withDuration: {
+          id: task2.id,
+          created: task2Exists,
+          isPhantom: !task2Exists
+        },
+        withDurationAndDate: {
+          id: task3.id,
+          created: task3Exists,
+          isPhantom: !task3Exists
+        }
+      },
+      cleanedUp: cleanup,
+      workspaceId: require('../config').config.motion.workspaceId
+    });
+  } catch (error) {
+    logger.error('Test Motion create failed', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.get('/verify-phantom-ids', async (req, res) => {
   try {
     logger.info('Checking for phantom Motion IDs...');

@@ -108,6 +108,11 @@ class MotionClient {
       
       const response = await this.client.post('/tasks', payload);
       
+      // Check if we got a valid response with an ID
+      if (!response.data || !response.data.id) {
+        throw new Error('Motion API returned success but no task ID');
+      }
+      
       logger.info('Task created in Motion', { taskId: response.data.id });
       return response.data;
     } catch (error) {
