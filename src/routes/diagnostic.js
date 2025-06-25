@@ -311,20 +311,16 @@ router.get('/database-stats', async (req, res) => {
 
 router.get('/sync-history/:pageId?', async (req, res) => {
   try {
-    if (!database.db) {
-      return res.status(503).json({ error: 'Database not initialized' });
-    }
-    
     const { pageId } = req.params;
     let history;
     
     if (pageId) {
-      history = await database.db.all(
-        'SELECT * FROM sync_history WHERE notion_page_id = ? ORDER BY timestamp DESC LIMIT 20',
+      history = await database.all(
+        'SELECT * FROM sync_history WHERE notion_page_id = $1 ORDER BY timestamp DESC LIMIT 20',
         [pageId]
       );
     } else {
-      history = await database.db.all(
+      history = await database.all(
         'SELECT * FROM sync_history ORDER BY timestamp DESC LIMIT 50'
       );
     }
@@ -344,11 +340,7 @@ router.get('/sync-history/:pageId?', async (req, res) => {
 
 router.get('/database-errors', async (req, res) => {
   try {
-    if (!database.db) {
-      return res.status(503).json({ error: 'Database not initialized' });
-    }
-    
-    const errors = await database.db.all(`
+    const errors = await database.all(`
       SELECT * FROM sync_tasks 
       WHERE sync_status = 'error' 
       ORDER BY updated_at DESC 

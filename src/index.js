@@ -100,19 +100,8 @@ const start = async () => {
     
     // Initialize database and mapping cache BEFORE starting server
     logger.info('Initializing database and mapping cache...');
-    try {
-      await mappingCache.initialize(notionClient);
-      logger.info('Database and mapping cache initialized successfully');
-    } catch (error) {
-      logger.error('CRITICAL: Failed to initialize database', { 
-        error: error.message,
-        stack: error.stack,
-        name: error.name,
-        code: error.code
-      });
-      // For now, continue without database to keep service running
-      logger.warn('Service will continue without database functionality');
-    }
+    await mappingCache.initialize(notionClient);
+    logger.info('Database and mapping cache initialized successfully');
     
     const port = config.port;
     app.listen(port, () => {
