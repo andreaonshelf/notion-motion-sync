@@ -412,4 +412,23 @@ router.get('/test-motion-pagination', async (req, res) => {
   }
 });
 
+router.post('/force-revalidate-all', async (req, res) => {
+  try {
+    // Force all tasks to be re-validated by setting last sync to old date
+    const result = await database.pool.query(`
+      UPDATE sync_tasks 
+      SET motion_last_synced = NOW() - INTERVAL '31 minutes'
+      WHERE motion_task_id IS NOT NULL
+    `);
+    
+    res.json({
+      success: true,
+      tasksMarkedForRevalidation: result.rowCount
+    });
+  } catch (error) {
+    logger.error('Error forcing revalidation', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;

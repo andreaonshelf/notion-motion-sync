@@ -105,7 +105,7 @@ const start = async () => {
     
     const port = config.port;
     app.listen(port, () => {
-      logger.info('Server started', { port, version: '1.1.0' });
+      logger.info('Server started', { port, version: '1.2.0' });
       logger.info('Webhook endpoints:', {
         notion: `/webhooks/notion`,
         motion: `/webhooks/motion`
