@@ -16,20 +16,8 @@ class MappingCache {
       await database.initialize();
       logger.info('Database initialized successfully');
       
-      // Query only schedulable tasks from Notion (same filter as poll service)
-      const filter = {
-        and: [
-          { property: 'Duration (minutes)', number: { is_not_empty: true } },
-          { property: 'Due date', date: { is_not_empty: true } },
-          { 
-            or: [
-              { property: 'Status', status: { equals: 'Not started' } },
-              { property: 'Status', status: { equals: 'In progress' } }
-            ]
-          }
-        ]
-      };
-      const tasks = await notionClient.queryDatabase(filter);
+      // Query ALL tasks from Notion - database mirrors Notion completely
+      const tasks = await notionClient.queryDatabase();
       
       let mappedCount = 0;
       let newCount = 0;

@@ -45,6 +45,48 @@ router.get('/notion-tasks', async (req, res) => {
   }
 });
 
+router.get('/schedule-status', async (req, res) => {
+  try {
+    // Get all Notion tasks
+    const notionTasks = await notionClient.queryDatabase();
+    
+    // Categorize by schedule status
+    const scheduled = notionTasks.filter(t => t.schedule);
+    const notScheduled = notionTasks.filter(t => !t.schedule);
+    
+    // Check which scheduled tasks have all required fields
+    const readyToSchedule = scheduled.filter(t => t.duration && t.dueDate);
+    const missingFields = scheduled.filter(t => !t.duration || !t.dueDate);
+    
+    res.json({
+      totalTasks: notionTasks.length,
+      scheduled: {
+        count: scheduled.length,
+        readyToSchedule: readyToSchedule.length,
+        missingFields: missingFields.length,
+        missingFieldsList: missingFields.map(t => ({
+          name: t.name,
+          hasDuration: !!t.duration,
+          hasDueDate: !!t.dueDate
+        }))
+      },
+      notScheduled: {
+        count: notScheduled.length,
+        withMotionId: notScheduled.filter(t => t.motionTaskId).length
+      },
+      sample: scheduled.slice(0, 5).map(t => ({
+        name: t.name,
+        schedule: t.schedule,
+        duration: t.duration,
+        dueDate: t.dueDate,
+        motionTaskId: t.motionTaskId
+      }))
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.get('/config-check', async (req, res) => {
   const { config } = require('../config');
   res.json({

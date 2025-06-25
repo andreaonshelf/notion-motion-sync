@@ -55,28 +55,23 @@ class PollService {
     try {
       logger.info('Updating Notion data in database...');
       
-      // Query only schedulable tasks from Notion
-      const filter = {
-        and: [
-          { property: 'Duration (minutes)', number: { is_not_empty: true } },
-          { property: 'Due date', date: { is_not_empty: true } },
-          { 
-            or: [
-              { property: 'Status', status: { equals: 'Not started' } },
-              { property: 'Status', status: { equals: 'In progress' } }
-            ]
-          }
-        ]
-      };
+      // Query ALL tasks from Notion (no filter) - database mirrors Notion
+      const notionTasks = await notionClient.queryDatabase();
+      logger.info(`Found ${notionTasks.length} total tasks in Notion`);
       
-      const notionTasks = await notionClient.queryDatabase(filter);
-      logger.info(`Found ${notionTasks.length} schedulable tasks in Notion`);
+      // Count scheduled tasks
+      const scheduledCount = notionTasks.filter(t => t.schedule).length;
+      logger.info(`${scheduledCount} tasks marked for scheduling`);
       
-      // Update database with latest task data
+      // Update database with ALL task data
       for (const task of notionTasks) {
         await database.upsertSyncTask(task.id, {
           name: task.name,
-          lastEdited: task.lastEdited
+          lastEdited: task.lastEdited,
+          schedule: task.schedule,
+          duration: task.duration,
+          dueDate: task.dueDate,
+          status: task.status
         });
         
         // If task has Motion ID, ensure it's in database
@@ -94,8 +89,8 @@ class PollService {
   
   async syncChangedTasks() {
     try {
-      // Get tasks that need syncing from database
-      const tasksToSync = await database.getTasksNeedingSync(5); // Process 5 at a time
+      // Get tasks that need syncing from database - only those with schedule = true
+      const tasksToSync = await database.getScheduledTasksNeedingSync(5); // Process 5 at a time
       
       if (tasksToSync.length === 0) {
         logger.info('No tasks need syncing');
@@ -123,18 +118,27 @@ class PollService {
           // Get fresh data from Notion
           const notionTask = await notionClient.getTask(syncTask.notion_page_id);
           
-          // Check if task still meets criteria
-          if (!notionTask.duration || !notionTask.dueDate || 
-              notionTask.status === 'Done' || notionTask.status === 'Archived') {
-            logger.info('Task no longer needs scheduling', { 
+          // Check if task still has schedule checkbox checked
+          if (!notionTask.schedule) {
+            logger.info('Task schedule unchecked, removing from Motion', { 
               name: notionTask.name,
-              status: notionTask.status 
+              hadMotionId: !!syncTask.motion_task_id
             });
             
             // If it has a Motion ID, delete from Motion
             if (syncTask.motion_task_id) {
-              await motionClient.deleteTask(syncTask.motion_task_id);
-              await database.removeMapping(syncTask.notion_page_id);
+              try {
+                await motionClient.deleteTask(syncTask.motion_task_id);
+                await database.pool.query(
+                  'UPDATE sync_tasks SET motion_task_id = NULL WHERE notion_page_id = $1',
+                  [syncTask.notion_page_id]
+                );
+                await database.logSync(syncTask.notion_page_id, syncTask.motion_task_id, 'schedule_unchecked', {
+                  name: notionTask.name
+                });
+              } catch (error) {
+                logger.error('Failed to delete Motion task', { error: error.message });
+              }
             }
             continue;
           }
@@ -245,17 +249,19 @@ class PollService {
       );
       const trackedSet = new Set(trackedMotionIds.map(r => r.motion_task_id));
       
-      // Get all Motion IDs from Notion (including those not in database yet)
+      // Get all Motion IDs from Notion that have Schedule = true
       const notionTasks = await notionClient.queryDatabase();
-      const notionMotionIds = new Set(
+      const scheduledNotionMotionIds = new Set(
         notionTasks
-          .filter(task => task.motionTaskId)
+          .filter(task => task.schedule && task.motionTaskId)
           .map(task => task.motionTaskId)
       );
       
-      // Find orphans - tasks that are in Motion but NOT in database AND NOT in Notion
+      // Find orphans - tasks that are in Motion but should NOT be:
+      // 1. Not in our database with schedule = true
+      // 2. Not in Notion with schedule = true
       const orphans = motionTasks.filter(task => 
-        !trackedSet.has(task.id) && !notionMotionIds.has(task.id)
+        !scheduledNotionMotionIds.has(task.id)
       );
       
       // Additional safety: only delete tasks older than 5 minutes

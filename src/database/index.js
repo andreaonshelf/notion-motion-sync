@@ -40,6 +40,9 @@ class DatabaseWrapper {
       
       // Create indexes for performance
       await this.createIndexes();
+      
+      // Run migrations
+      await this.runMigrations();
 
       this.initialized = true;
       logger.info('Database initialized successfully');
@@ -124,14 +127,51 @@ class DatabaseWrapper {
     `);
   }
 
+  async runMigrations() {
+    try {
+      logger.info('Running database migrations...');
+      
+      // Add schedule checkbox and other fields
+      await this.pool.query(`
+        ALTER TABLE sync_tasks 
+        ADD COLUMN IF NOT EXISTS schedule_checkbox BOOLEAN DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS duration INTEGER,
+        ADD COLUMN IF NOT EXISTS due_date DATE,
+        ADD COLUMN IF NOT EXISTS status TEXT;
+      `);
+      
+      // Create index for schedule checkbox
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_schedule ON sync_tasks(schedule_checkbox);
+      `);
+      
+      logger.info('Migrations completed successfully');
+    } catch (error) {
+      logger.error('Migration failed', { error: error.message });
+      // Don't throw - migrations might have already run
+    }
+  }
+
   // Get or create a sync task record
   async upsertSyncTask(notionPageId, data = {}) {
     const query = `
-      INSERT INTO sync_tasks (notion_page_id, notion_name, notion_last_edited)
-      VALUES ($1, $2, $3)
+      INSERT INTO sync_tasks (
+        notion_page_id, 
+        notion_name, 
+        notion_last_edited,
+        schedule_checkbox,
+        duration,
+        due_date,
+        status
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
       ON CONFLICT(notion_page_id) DO UPDATE SET
         notion_name = EXCLUDED.notion_name,
         notion_last_edited = EXCLUDED.notion_last_edited,
+        schedule_checkbox = EXCLUDED.schedule_checkbox,
+        duration = EXCLUDED.duration,
+        due_date = EXCLUDED.due_date,
+        status = EXCLUDED.status,
         updated_at = CURRENT_TIMESTAMP
       RETURNING *;
     `;
@@ -139,7 +179,11 @@ class DatabaseWrapper {
     const result = await this.pool.query(query, [
       notionPageId,
       data.name || null,
-      data.lastEdited || null
+      data.lastEdited || null,
+      data.schedule || false,
+      data.duration || null,
+      data.dueDate || null,
+      data.status || null
     ]);
     
     return result.rows[0];
@@ -176,6 +220,37 @@ class DatabaseWrapper {
         -- Periodic re-validation: check all tasks every 30 minutes
         OR (motion_task_id IS NOT NULL AND motion_last_synced < NOW() - INTERVAL '30 minutes')
       )
+      ORDER BY 
+        CASE 
+          WHEN sync_status = 'error' THEN error_count
+          ELSE 0
+        END ASC,
+        motion_last_synced ASC NULLS FIRST,
+        notion_last_edited DESC
+      LIMIT $1;
+    `;
+    
+    const result = await this.pool.query(query, [limit]);
+    return result.rows;
+  }
+
+  // Get only scheduled tasks that need syncing
+  async getScheduledTasksNeedingSync(limit = 10) {
+    const query = `
+      SELECT * FROM sync_tasks
+      WHERE schedule_checkbox = true
+        AND (
+          -- New scheduled tasks without Motion ID
+          (motion_task_id IS NULL AND sync_status = 'pending')
+          -- Failed tasks ready for retry
+          OR (sync_status = 'error' AND updated_at + INTERVAL '1 minute' * error_count * 5 < NOW())
+          -- Tasks with changes
+          OR (motion_task_id IS NOT NULL AND notion_last_edited > motion_last_synced)
+          -- Stuck syncing tasks
+          OR (sync_status = 'syncing' AND sync_lock_until < NOW())
+          -- Periodic re-validation: check all tasks every 30 minutes
+          OR (motion_task_id IS NOT NULL AND motion_last_synced < NOW() - INTERVAL '30 minutes')
+        )
       ORDER BY 
         CASE 
           WHEN sync_status = 'error' THEN error_count

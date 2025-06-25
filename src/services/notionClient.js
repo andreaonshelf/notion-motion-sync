@@ -125,6 +125,7 @@ class NotionClient {
       priority: properties.Priority?.select?.name || 'Medium',
       dueDate: properties['Due date']?.date?.start || null,
       duration: properties['Duration (minutes)']?.number || null,
+      schedule: properties.Schedule?.checkbox || false,
       motionTaskId: properties['Motion Task ID']?.rich_text?.[0]?.plain_text || null,
       lastSynced: null,
       lastEdited: page.last_edited_time,
@@ -193,6 +194,12 @@ class NotionClient {
     if (taskData.duration !== undefined) {
       properties['Duration (minutes)'] = {
         number: taskData.duration
+      };
+    }
+    
+    if (taskData.schedule !== undefined) {
+      properties.Schedule = {
+        checkbox: taskData.schedule
       };
     }
     
