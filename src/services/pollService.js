@@ -68,7 +68,8 @@ class PollService {
       await this.processMotionOperations();
       
       // Step 3: Clean up orphaned Motion tasks
-      await this.cleanupOrphanedMotionTasks();
+      // DISABLED: Motion API returning 0 tasks, causing false positives
+      // await this.cleanupOrphanedMotionTasks();
       
       logger.info('=== SLOW SYNC END ===');
     } catch (error) {
