@@ -892,8 +892,8 @@ router.get('/scheduled-tasks-state', async (req, res) => {
         error_message,
         error_count,
         schedule_checkbox,
-        notion_duration,
-        notion_due_date,
+        duration,
+        due_date,
         notion_last_edited,
         motion_last_synced,
         updated_at
