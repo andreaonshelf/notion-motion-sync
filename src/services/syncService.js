@@ -140,7 +140,7 @@ class SyncService {
             });
           }
         } catch (verifyError) {
-          logger.error('Motion API BUG: Returned task ID but task does not exist', {
+          logger.error('Task verification failed - possible race condition with cleanup', {
             notionPageId,
             phantomMotionId: motionTask.id,
             taskName: notionTask.name,
@@ -149,9 +149,9 @@ class SyncService {
             duration: notionTask.duration,
             dueDate: notionTask.dueDate,
             error: verifyError.message,
-            explanation: 'Motion API returned a task ID but the task was never created. This is a known Motion API issue with tasks that have both duration and due date.'
+            explanation: 'Task was likely created but deleted by our cleanup function before verification completed.'
           });
-          throw new Error(`Motion API phantom ID bug: Task ${motionTask.id} was never created despite API returning success`);
+          throw new Error(`Task verification failed: ${motionTask.id} not found (likely deleted by cleanup)`);
         }
         
         await notionClient.updateTask(notionPageId, {
