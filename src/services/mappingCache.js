@@ -66,14 +66,14 @@ class MappingCache {
       return;
     }
     
-    // Update database
+    // Store Motion ID in database and mark for Notion sync (database-centric approach)
     await database.setMotionTaskId(notionPageId, motionTaskId);
     
     // Update in-memory cache
     this.notionToMotion.set(notionPageId, motionTaskId);
     this.motionToNotion.set(motionTaskId, notionPageId);
     
-    logger.debug('Mapping set', { notionPageId, motionTaskId });
+    logger.debug('Mapping set in database-centric way', { notionPageId, motionTaskId });
   }
 
   async getMotionId(notionPageId) {

@@ -208,7 +208,8 @@ class DatabaseWrapper {
           sync_status = 'synced',
           motion_last_synced = CURRENT_TIMESTAMP,
           error_message = NULL,
-          error_count = 0
+          error_count = 0,
+          notion_sync_needed = true
       WHERE notion_page_id = $2;
     `;
     
@@ -458,7 +459,7 @@ class DatabaseWrapper {
       SET motion_sync_needed = false,
           motion_last_attempt = CURRENT_TIMESTAMP,
           motion_task_id = $1,
-          notion_sync_needed = CASE WHEN $1 IS NOT NULL THEN true ELSE notion_sync_needed END
+          notion_sync_needed = true
       WHERE notion_page_id = $2
     `;
     await this.pool.query(query, [motionTaskId, notionPageId]);
