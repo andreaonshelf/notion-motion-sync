@@ -137,8 +137,7 @@ class DatabaseWrapper {
         ADD COLUMN IF NOT EXISTS schedule_checkbox BOOLEAN DEFAULT FALSE,
         ADD COLUMN IF NOT EXISTS duration INTEGER,
         ADD COLUMN IF NOT EXISTS due_date DATE,
-        ADD COLUMN IF NOT EXISTS status TEXT,
-        ADD COLUMN IF NOT EXISTS priority TEXT DEFAULT 'Medium';
+        ADD COLUMN IF NOT EXISTS status TEXT;
       `);
       
       // Add multi-speed sync fields
@@ -174,10 +173,9 @@ class DatabaseWrapper {
         schedule_checkbox,
         duration,
         due_date,
-        status,
-        priority
+        status
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
       ON CONFLICT(notion_page_id) DO UPDATE SET
         notion_name = EXCLUDED.notion_name,
         notion_last_edited = EXCLUDED.notion_last_edited,
@@ -185,7 +183,6 @@ class DatabaseWrapper {
         duration = EXCLUDED.duration,
         due_date = EXCLUDED.due_date,
         status = EXCLUDED.status,
-        priority = EXCLUDED.priority,
         updated_at = CURRENT_TIMESTAMP
       RETURNING *;
     `;
@@ -197,8 +194,7 @@ class DatabaseWrapper {
       data.schedule || false,
       data.duration || null,
       data.dueDate || null,
-      data.status || null,
-      data.priority || 'Medium'
+      data.status || null
     ]);
     
     return result.rows[0];

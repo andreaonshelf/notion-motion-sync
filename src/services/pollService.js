@@ -97,8 +97,7 @@ class PollService {
           schedule: task.schedule,
           duration: task.duration,
           dueDate: task.dueDate,
-          status: task.status,
-          priority: task.priority
+          status: task.status
         });
         
         // Handle Motion ID based on schedule status
@@ -261,8 +260,7 @@ class PollService {
         name: task.notion_name,
         duration: task.duration,
         dueDate: task.due_date,
-        status: 'Not started',
-        priority: this.mapNotionPriorityToMotion(task.priority)
+        status: 'Not started'
       };
       
       const motionTask = await motionClient.createTask(motionTaskData);
@@ -301,8 +299,7 @@ class PollService {
       const updateData = {
         name: task.notion_name,
         duration: task.duration,
-        dueDate: task.due_date,
-        priority: this.mapNotionPriorityToMotion(task.priority)
+        dueDate: task.due_date
       };
       
       await motionClient.updateTask(task.motion_task_id, updateData);
@@ -410,16 +407,6 @@ class PollService {
     }
   }
   
-  // Map Notion priority to Motion priority format
-  mapNotionPriorityToMotion(notionPriority) {
-    const priorityMap = {
-      'High': 'HIGH',
-      'Medium': 'MEDIUM',
-      'Low': 'LOW'
-    };
-    return priorityMap[notionPriority] || 'MEDIUM';
-  }
-
   // Legacy method for backward compatibility
   async pollForChanges() {
     logger.warn('pollForChanges() is deprecated, using fastSync() + slowSync()');
