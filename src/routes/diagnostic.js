@@ -121,6 +121,53 @@ router.get('/motion-task/:taskId', async (req, res) => {
   }
 });
 
+router.post('/force-sync-task/:taskName', async (req, res) => {
+  try {
+    const { taskName } = req.params;
+    logger.info('FORCE SYNC: Starting sync for task', { taskName });
+    
+    // Get task from Notion
+    const notionTasks = await notionClient.queryDatabase();
+    const notionTask = notionTasks.find(t => t.name === taskName);
+    
+    if (!notionTask) {
+      return res.status(404).json({ error: `Task ${taskName} not found in Notion` });
+    }
+    
+    logger.info('FORCE SYNC: Found task in Notion', {
+      name: notionTask.name,
+      id: notionTask.id,
+      motionTaskId: notionTask.motionTaskId,
+      duration: notionTask.duration,
+      dueDate: notionTask.dueDate
+    });
+    
+    // Sync it
+    await syncService.syncNotionToMotion(notionTask.id);
+    
+    // Check Motion after sync
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    const motionTask = await motionClient.getTask(notionTask.motionTaskId);
+    
+    res.json({
+      success: true,
+      notion: {
+        name: notionTask.name,
+        duration: notionTask.duration,
+        dueDate: notionTask.dueDate
+      },
+      motionAfterSync: {
+        id: motionTask.id,
+        duration: motionTask.duration,
+        dueDate: motionTask.dueDate
+      }
+    });
+  } catch (error) {
+    logger.error('FORCE SYNC: Error', { error: error.message, stack: error.stack });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.post('/force-sync-raycast', async (req, res) => {
   try {
     logger.info('FORCE SYNC: Starting Raycast sync');
