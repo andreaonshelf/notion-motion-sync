@@ -38,6 +38,46 @@ class SyncService {
           motionTaskId: motionTask.id 
         });
       } else {
+        // Check if a Motion task with this name already exists
+        const motionResponse = await motionClient.listTasks();
+        const existingMotion = (motionResponse.tasks || []).find(
+          task => task.name === notionTask.name
+        );
+        
+        if (existingMotion) {
+          logger.warn('Motion task already exists with same name, linking instead of creating', {
+            notionName: notionTask.name,
+            existingMotionId: existingMotion.id
+          });
+          
+          // Link the existing Motion task to Notion
+          await notionClient.updateTask(notionPageId, {
+            motionTaskId: existingMotion.id
+          });
+          
+          // Update the existing Motion task with latest data
+          const enhancedDescription = this.enhanceDescriptionWithAttachments(notionTask);
+          const motionTask = await motionClient.updateTask(existingMotion.id, {
+            name: notionTask.name,
+            description: enhancedDescription,
+            status: notionTask.status,
+            priority: notionTask.priority,
+            dueDate: notionTask.dueDate,
+            duration: notionTask.duration
+          });
+          
+          // Cache the mapping
+          mappingCache.setMapping(notionPageId, existingMotion.id);
+          
+          logger.info('Linked existing Motion task to Notion', { 
+            notionPageId, 
+            motionTaskId: existingMotion.id 
+          });
+          
+          return;
+        }
+        
+        // No existing task, create new one
         const enhancedDescription = this.enhanceDescriptionWithAttachments(notionTask);
         const motionTask = await motionClient.createTask({
           name: notionTask.name,
