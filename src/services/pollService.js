@@ -420,16 +420,24 @@ class PollService {
           // Delete from Motion
           await motionClient.deleteTask(orphan.id);
           
-          // Clear from database if it exists there (shouldn't, but safety)
+          // Immediately clear the Motion ID from database and mark for recreation
           await database.pool.query(
-            'UPDATE sync_tasks SET motion_task_id = NULL, notion_sync_needed = true WHERE motion_task_id = $1',
+            `UPDATE sync_tasks 
+             SET motion_task_id = NULL, 
+                 motion_sync_needed = true,
+                 motion_priority = 1,
+                 notion_sync_needed = true 
+             WHERE motion_task_id = $1`,
             [orphan.id]
           );
+          
+          logger.info(`Cleared Motion ID ${orphan.id} from database after deletion`);
           
           // Log cleanup
           await database.logSync(null, orphan.id, 'orphan_cleanup', {
             name: orphan.name,
-            age: `${age} minutes`
+            age: `${age} minutes`,
+            action: 'deleted_motion_and_cleared_database'
           });
           
           // Rate limit between deletions
