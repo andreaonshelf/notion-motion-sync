@@ -68,8 +68,7 @@ class PollService {
       await this.processMotionOperations();
       
       // Step 3: Clean up orphaned Motion tasks
-      // DISABLED: Motion API returning 0 tasks, causing false positives
-      // await this.cleanupOrphanedMotionTasks();
+      await this.cleanupOrphanedMotionTasks();
       
       logger.info('=== SLOW SYNC END ===');
     } catch (error) {
@@ -360,18 +359,41 @@ class PollService {
         return;
       }
       
-      // Get all scheduled tasks from database (schedule_checkbox = true)
-      const scheduledTasks = await database.all(
-        'SELECT motion_task_id FROM sync_tasks WHERE schedule_checkbox = true AND motion_task_id IS NOT NULL'
+      // Get all tasks that SHOULD be in Motion (schedule_checkbox = true)
+      const shouldBeInMotion = await database.all(
+        'SELECT notion_name, motion_task_id FROM sync_tasks WHERE schedule_checkbox = true'
       );
-      const validMotionIds = new Set(scheduledTasks.map(t => t.motion_task_id));
       
-      logger.info(`Found ${scheduledTasks.length} scheduled tasks with Motion IDs`, {
-        validIds: Array.from(validMotionIds)
+      // Only consider Motion IDs that we know about (not phantom/stale ones)
+      const knownMotionIds = new Set(
+        shouldBeInMotion
+          .filter(t => t.motion_task_id) // Has a Motion ID
+          .map(t => t.motion_task_id)
+      );
+      
+      logger.info(`Found ${shouldBeInMotion.length} tasks that should be in Motion`, {
+        withMotionIds: knownMotionIds.size,
+        knownIds: Array.from(knownMotionIds)
       });
       
-      // Find orphaned Motion tasks (exist in Motion but not in our scheduled tasks)
-      const orphanedTasks = motionTasks.filter(task => !validMotionIds.has(task.id));
+      // Find truly orphaned Motion tasks: exist in Motion but should NOT be scheduled
+      // (Motion tasks that exist but we have no record of them being scheduled)
+      const orphanedTasks = motionTasks.filter(task => {
+        // If we know about this Motion ID, it's not orphaned
+        if (knownMotionIds.has(task.id)) {
+          return false;
+        }
+        
+        // If we have ANY scheduled task without a Motion ID, this could be for that task
+        // So don't delete it - let the sync process handle it
+        const hasUnmatchedScheduledTasks = shouldBeInMotion.some(t => !t.motion_task_id);
+        if (hasUnmatchedScheduledTasks) {
+          return false;
+        }
+        
+        // Only delete if we're confident it's truly orphaned
+        return true;
+      });
       
       // Apply 2-minute safety buffer - only delete tasks older than 2 minutes
       const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
