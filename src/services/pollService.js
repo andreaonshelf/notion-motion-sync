@@ -101,21 +101,8 @@ class PollService {
           priority: task.priority
         });
         
-        // Handle Motion ID based on schedule status
-        if (task.motionTaskId && task.schedule && (!oldTask || !oldTask.motion_task_id)) {
-          // Preserve Motion ID for scheduled tasks
-          await database.pool.query(
-            'UPDATE sync_tasks SET motion_task_id = $1 WHERE notion_page_id = $2',
-            [task.motionTaskId, task.id]
-          );
-        } else if (task.motionTaskId && !task.schedule) {
-          // Clear Motion ID for unscheduled tasks and mark for Notion sync
-          await database.pool.query(
-            'UPDATE sync_tasks SET motion_task_id = NULL, notion_sync_needed = true WHERE notion_page_id = $1',
-            [task.id]
-          );
-          logger.info(`Clearing Motion ID from unscheduled task: ${task.name}`);
-        }
+        // NEVER import Motion IDs from Notion - they only flow Motion → Database → Notion
+        // Motion IDs are only set by Motion API responses, never from Notion data
         
         updatedCount++;
       }
