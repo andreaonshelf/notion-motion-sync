@@ -144,7 +144,10 @@ class MotionClient {
 
   async updateTask(taskId, taskData) {
     try {
-      const updatePayload = {};
+      const updatePayload = {
+        // Always include workspaceId to ensure task stays in correct workspace
+        workspaceId: config.motion.workspaceId
+      };
       
       // Only include fields that are provided
       if (taskData.name !== undefined) {

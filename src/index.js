@@ -96,6 +96,7 @@ app.use('/test-flow', require('./routes/test-motion-fields-flow'));
 app.use('/refresh-fields', require('./routes/refresh-motion-fields'));
 app.use('/debug-motion', require('./routes/debug-motion-task'));
 app.use('/restore-motion', require('./routes/restore-motion-ids'));
+app.use('/debug-http', require('./routes/debug-http-trace'));
 
 app.use((req, res) => {
   res.status(404).json({ error: 'Not found' });
