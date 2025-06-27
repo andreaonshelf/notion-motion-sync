@@ -1,0 +1,9 @@
+Add Motion fields refresh endpoint for existing tasks
+
+Motion Task IDs are appearing in Notion but scheduling fields aren't populated. 
+This endpoint manually refreshes Motion fields for all existing tasks with Motion IDs
+and then triggers fast sync to push them to Notion.
+
+🤖 Generated with [Claude Code](https://claude.ai/code)
+
+Co-Authored-By: Claude <noreply@anthropic.com>
