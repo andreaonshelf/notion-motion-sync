@@ -2,17 +2,45 @@ const notionClient = require('./notionClient');
 const motionClient = require('./motionClient');
 const database = require('../database');
 const logger = require('../utils/logger');
+const TransactionWrapper = require('../database/transactionWrapper');
 
 class PollService {
   constructor() {
     this.fastInterval = null;
     this.slowInterval = null;
+    this.transactionWrapper = null;
   }
   
-  // Execute Motion operation with database update atomically
+  // Initialize transaction wrapper when database is ready
+  async initializeTransactions() {
+    if (!this.transactionWrapper && database.pool) {
+      this.transactionWrapper = new TransactionWrapper(database.pool);
+    }
+  }
+  
+  // Execute Motion operation with true database transaction atomicity
   async executeMotionOperation(operation, dbUpdate, rollback) {
+    // Ensure transaction wrapper is initialized
+    await this.initializeTransactions();
+    
+    // For backwards compatibility, support the old callback-style interface
+    if (typeof dbUpdate === 'function') {
+      return this.executeMotionOperationLegacy(operation, dbUpdate, rollback);
+    }
+    
+    // New transaction-based approach
+    const motionOperation = operation;
+    const databaseOperations = dbUpdate; // Array of {query, params, notionPageId}
+    
+    return await this.transactionWrapper.executeWithTransaction(
+      motionOperation,
+      databaseOperations
+    );
+  }
+  
+  // Legacy executeMotionOperation for backwards compatibility
+  async executeMotionOperationLegacy(operation, dbUpdate, rollback) {
     let operationResult = null;
-    let dbUpdated = false;
     
     try {
       // Execute Motion operation
@@ -21,7 +49,6 @@ class PollService {
       // Execute database update
       try {
         await dbUpdate(operationResult);
-        dbUpdated = true;
       } catch (dbError) {
         // Motion operation succeeded but DB update failed - CRITICAL
         logger.error('CRITICAL: Motion operation succeeded but database update failed', {
@@ -91,7 +118,10 @@ class PollService {
       // Step 1: Notion → Database (capture all user changes)
       await this.syncNotionToDatabase();
       
-      // Step 2: Database → Notion (show Motion IDs and status updates)
+      // Step 2: Verify Motion ID consistency (Database ↔ Motion verification)
+      await this.verifyMotionIdConsistency();
+      
+      // Step 3: Database → Notion (show Motion IDs and status updates)
       await this.syncDatabaseToNotion();
       
       logger.info('=== FAST SYNC END ===');
@@ -577,57 +607,22 @@ class PollService {
         motionTaskNames: motionTasks.map(t => `${t.name} (${t.id})`)
       });
       
-      // Find truly orphaned Motion tasks with safer logic
-      const orphanedTasks = motionTasks.filter(task => {
-        // Check if database has a record with this exact Motion ID
-        const dbRecordWithMotionId = shouldBeInMotion.find(dbTask => dbTask.motion_task_id === task.id);
+      // Find orphaned Motion tasks: exist in Motion but database doesn't know about them
+      // Database is the authority - if it doesn't have the Motion ID, the Motion task shouldn't exist
+      const orphanedTasks = motionTasks.filter(motionTask => {
+        // Does ANY database record have this exact Motion ID?
+        const hasDbRecord = shouldBeInMotion.some(dbTask => dbTask.motion_task_id === motionTask.id);
         
-        if (dbRecordWithMotionId) {
-          // Database has this Motion ID - NOT orphaned
-          logger.debug(`Motion task ${task.name} (${task.id}) found in database - NOT orphaned`);
+        if (hasDbRecord) {
+          logger.debug(`Motion task ${motionTask.name} (${motionTask.id}) found in database - NOT orphaned`);
           return false;
         }
         
-        // No database record has this Motion ID
-        // Check if there's a scheduled task that could match by name (fallback safety)
-        const nameMatch = shouldBeInMotion.find(dbTask => 
-          dbTask.notion_name && task.name &&
-          dbTask.notion_name.toLowerCase().trim() === task.name.toLowerCase().trim()
-        );
-        
-        if (nameMatch && !nameMatch.motion_task_id) {
-          // There's a scheduled task with this name but no Motion ID
-          // This Motion task likely belongs to it - NOT orphaned
-          logger.info(`Motion task ${task.name} (${task.id}) matches scheduled task by name - NOT orphaned`, {
-            dbTaskName: nameMatch.notion_name,
-            willReconnect: true
-          });
-          
-          // Automatically reconnect this Motion task to the database record
-          database.completeMotionSync(nameMatch.notion_page_id, task.id).catch(err => {
-            logger.error('Failed to auto-reconnect Motion task', { 
-              motionId: task.id, 
-              taskName: task.name,
-              error: err.message 
-            });
-          });
-          
-          return false;
-        }
-        
-        // Additional safety: if we have ANY unmatched scheduled tasks, be extra conservative
-        const hasUnmatchedScheduledTasks = shouldBeInMotion.some(t => !t.motion_task_id);
-        if (hasUnmatchedScheduledTasks) {
-          logger.warn(`Motion task ${task.name} (${task.id}) could belong to unmatched scheduled task - being conservative`, {
-            unmatchedCount: shouldBeInMotion.filter(t => !t.motion_task_id).length
-          });
-          return false;
-        }
-        
-        // No matching scheduled task found - truly orphaned
-        logger.warn(`Motion task ${task.name} (${task.id}) appears to be truly orphaned`, {
-          scheduledTaskCount: shouldBeInMotion.length,
-          scheduledTaskNames: shouldBeInMotion.map(t => t.notion_name)
+        // Database has no record of this Motion ID - it's orphaned and should be deleted
+        logger.warn(`Motion task ${motionTask.name} (${motionTask.id}) not found in database - ORPHANED`, {
+          reason: 'database_has_no_record_of_this_motion_id',
+          scheduledTasksInDb: shouldBeInMotion.length,
+          motionIdsInDb: shouldBeInMotion.filter(t => t.motion_task_id).map(t => t.motion_task_id)
         });
         return true;
       });
@@ -817,6 +812,87 @@ class PollService {
       
     } catch (error) {
       logger.error('Error refreshing Motion scheduling data', { error: error.message });
+    }
+  }
+
+  // Verify Motion ID consistency: Database Motion IDs must exist in Motion
+  async verifyMotionIdConsistency() {
+    try {
+      logger.debug('Verifying Motion ID consistency...');
+      
+      // Get all database records with Motion IDs
+      const tasksWithMotionIds = await database.all(`
+        SELECT notion_page_id, notion_name, motion_task_id 
+        FROM sync_tasks 
+        WHERE motion_task_id IS NOT NULL
+      `);
+      
+      if (tasksWithMotionIds.length === 0) {
+        logger.debug('No Motion IDs in database to verify');
+        return;
+      }
+      
+      logger.info(`Verifying ${tasksWithMotionIds.length} Motion IDs exist in Motion`);
+      
+      let invalidCount = 0;
+      for (const dbTask of tasksWithMotionIds) {
+        try {
+          // Check if Motion task actually exists
+          await motionClient.getTask(dbTask.motion_task_id);
+          // Task exists - Motion ID is valid
+          
+        } catch (error) {
+          if (error.response?.status === 404) {
+            // Motion task doesn't exist - clear invalid Motion ID from database
+            invalidCount++;
+            logger.warn(`Invalid Motion ID in database - clearing: ${dbTask.notion_name}`, {
+              motionId: dbTask.motion_task_id,
+              reason: 'motion_task_not_found'
+            });
+            
+            // Clear the invalid Motion ID atomically
+            await database.run(`
+              UPDATE sync_tasks 
+              SET motion_task_id = NULL,
+                  motion_scheduled_start = NULL,
+                  motion_scheduled_end = NULL,
+                  motion_status_name = NULL,
+                  motion_scheduling_issue = NULL,
+                  motion_completed = NULL,
+                  motion_deadline_type = NULL,
+                  motion_start_on = NULL,
+                  motion_sync_needed = CASE 
+                    WHEN schedule_checkbox = true THEN true 
+                    ELSE false 
+                  END,
+                  notion_sync_needed = true
+              WHERE notion_page_id = $1
+            `, [dbTask.notion_page_id]);
+            
+            // Log the correction
+            await database.logSync(dbTask.notion_page_id, dbTask.motion_task_id, 'invalid_motion_id_cleared', {
+              taskName: dbTask.notion_name,
+              reason: 'motion_task_404_not_found'
+            });
+            
+          } else {
+            logger.error(`Error verifying Motion task: ${dbTask.notion_name}`, {
+              motionId: dbTask.motion_task_id,
+              error: error.message
+            });
+          }
+        }
+        
+        // Rate limit to avoid overwhelming Motion API
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
+      if (invalidCount > 0) {
+        logger.info(`Cleared ${invalidCount} invalid Motion IDs from database`);
+      }
+      
+    } catch (error) {
+      logger.error('Error during Motion ID verification', { error: error.message });
     }
   }
   
