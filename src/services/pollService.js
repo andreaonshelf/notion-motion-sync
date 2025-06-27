@@ -105,16 +105,19 @@ class PollService {
     try {
       logger.info('=== SLOW SYNC START ===');
       
-      // Step 1: Detect which tasks need Motion operations
-      await this.detectMotionSyncNeeds();
-      
-      // Step 2: Process Motion operations (rate-limited)
-      await this.processMotionOperations();
-      
-      // Step 3: Refresh Motion scheduling data for unscheduled tasks
+      // Step 1: Refresh Motion scheduling data FIRST (catch recently created tasks)
       await this.refreshMotionSchedulingData();
       
-      // Step 4: Clean up orphaned Motion tasks
+      // Step 2: Detect which tasks need Motion operations
+      await this.detectMotionSyncNeeds();
+      
+      // Step 3: Process Motion operations (rate-limited)
+      await this.processMotionOperations();
+      
+      // Step 4: Refresh Motion scheduling data AGAIN (catch just-created tasks)
+      await this.refreshMotionSchedulingData();
+      
+      // Step 5: Clean up orphaned Motion tasks
       await this.cleanupOrphanedMotionTasks();
       
       logger.info('=== SLOW SYNC END ===');
@@ -403,19 +406,29 @@ class PollService {
         }
       );
       
-      // Wait a bit for Motion's auto-scheduler to run
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      
-      // Fetch full task details and update Motion fields
+      // Try to get initial scheduling data (might be null)
       try {
         const fullMotionTask = await motionClient.getTask(motionTask.id);
         await database.updateMotionFields(task.notion_page_id, fullMotionTask);
-        logger.info(`Motion task created and fields stored: ${task.notion_name}`, { 
-          motionId: motionTask.id,
-          scheduledStart: fullMotionTask.scheduledStart,
-          scheduledEnd: fullMotionTask.scheduledEnd,
-          wasScheduled: !!fullMotionTask.scheduledStart
-        });
+        
+        if (!fullMotionTask.scheduledStart) {
+          // Motion hasn't scheduled it yet - mark for later refresh
+          logger.info(`Motion task created but not yet scheduled: ${task.notion_name}`, { 
+            motionId: motionTask.id,
+            willCheckAgain: true
+          });
+          // Mark task as needing scheduling refresh
+          await database.run(
+            'UPDATE sync_tasks SET needs_scheduling_refresh = true WHERE notion_page_id = $1',
+            [task.notion_page_id]
+          );
+        } else {
+          logger.info(`Motion task created and scheduled: ${task.notion_name}`, { 
+            motionId: motionTask.id,
+            scheduledStart: fullMotionTask.scheduledStart,
+            scheduledEnd: fullMotionTask.scheduledEnd
+          });
+        }
       } catch (error) {
         logger.warn(`Created Motion task but couldn't fetch details: ${error.message}`);
       }
@@ -664,12 +677,16 @@ class PollService {
     try {
       logger.info('Checking for Motion scheduling updates...');
       
+      // Check both: tasks without scheduling AND tasks marked for refresh
       const unscheduledTasks = await database.all(`
         SELECT notion_page_id, notion_name, motion_task_id 
         FROM sync_tasks 
         WHERE motion_task_id IS NOT NULL 
-        AND motion_scheduled_start IS NULL
         AND schedule_checkbox = true
+        AND (
+          motion_scheduled_start IS NULL
+          OR needs_scheduling_refresh = true
+        )
       `);
       
       if (unscheduledTasks.length === 0) {
@@ -685,6 +702,11 @@ class PollService {
           
           if (motionTask.scheduledStart || motionTask.scheduledEnd) {
             await database.updateMotionFields(task.notion_page_id, motionTask);
+            // Clear the refresh flag
+            await database.run(
+              'UPDATE sync_tasks SET needs_scheduling_refresh = false WHERE notion_page_id = $1',
+              [task.notion_page_id]
+            );
             updatedCount++;
             logger.info(`Updated scheduling for: ${task.notion_name}`, {
               scheduledStart: motionTask.scheduledStart,

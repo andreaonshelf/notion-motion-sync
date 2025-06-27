@@ -168,7 +168,8 @@ class DatabaseWrapper {
         ADD COLUMN IF NOT EXISTS motion_sync_needed BOOLEAN DEFAULT FALSE,
         ADD COLUMN IF NOT EXISTS motion_priority INTEGER DEFAULT 0,
         ADD COLUMN IF NOT EXISTS motion_last_attempt TIMESTAMP,
-        ADD COLUMN IF NOT EXISTS notion_sync_needed BOOLEAN DEFAULT FALSE;
+        ADD COLUMN IF NOT EXISTS notion_sync_needed BOOLEAN DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS needs_scheduling_refresh BOOLEAN DEFAULT FALSE;
       `);
       
       // Create indexes
