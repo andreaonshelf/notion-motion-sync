@@ -104,6 +104,7 @@ app.use('/check-ai-forge', require('./routes/check-ai-forge-status'));
 app.use('/motion-refresh', require('./routes/force-motion-refresh'));
 app.use('/motion-diagnostic', require('./routes/motion-api-diagnostic'));
 app.use('/motion-schedule', require('./routes/force-motion-autoschedule'));
+app.use('/motion-force', require('./routes/motion-schedule-workround'));
 
 app.use((req, res) => {
   res.status(404).json({ error: 'Not found' });
