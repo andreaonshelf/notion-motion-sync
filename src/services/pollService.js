@@ -569,25 +569,66 @@ class PollService {
       
       logger.info(`Found ${shouldBeInMotion.length} tasks that should be in Motion`, {
         withMotionIds: knownMotionIds.size,
-        knownIds: Array.from(knownMotionIds)
+        knownIds: Array.from(knownMotionIds),
+        scheduledTaskNames: shouldBeInMotion.map(t => `${t.notion_name} (${t.motion_task_id || 'NO_ID'})`)
       });
       
-      // Find truly orphaned Motion tasks: exist in Motion but should NOT be scheduled
-      // (Motion tasks that exist but we have no record of them being scheduled)
+      logger.info(`Found ${motionTasks.length} tasks in Motion`, {
+        motionTaskNames: motionTasks.map(t => `${t.name} (${t.id})`)
+      });
+      
+      // Find truly orphaned Motion tasks with safer logic
       const orphanedTasks = motionTasks.filter(task => {
-        // If we know about this Motion ID, it's not orphaned
-        if (knownMotionIds.has(task.id)) {
+        // Check if database has a record with this exact Motion ID
+        const dbRecordWithMotionId = shouldBeInMotion.find(dbTask => dbTask.motion_task_id === task.id);
+        
+        if (dbRecordWithMotionId) {
+          // Database has this Motion ID - NOT orphaned
+          logger.debug(`Motion task ${task.name} (${task.id}) found in database - NOT orphaned`);
           return false;
         }
         
-        // If we have ANY scheduled task without a Motion ID, this could be for that task
-        // So don't delete it - let the sync process handle it
+        // No database record has this Motion ID
+        // Check if there's a scheduled task that could match by name (fallback safety)
+        const nameMatch = shouldBeInMotion.find(dbTask => 
+          dbTask.notion_name && task.name &&
+          dbTask.notion_name.toLowerCase().trim() === task.name.toLowerCase().trim()
+        );
+        
+        if (nameMatch && !nameMatch.motion_task_id) {
+          // There's a scheduled task with this name but no Motion ID
+          // This Motion task likely belongs to it - NOT orphaned
+          logger.info(`Motion task ${task.name} (${task.id}) matches scheduled task by name - NOT orphaned`, {
+            dbTaskName: nameMatch.notion_name,
+            willReconnect: true
+          });
+          
+          // Automatically reconnect this Motion task to the database record
+          database.completeMotionSync(nameMatch.notion_page_id, task.id).catch(err => {
+            logger.error('Failed to auto-reconnect Motion task', { 
+              motionId: task.id, 
+              taskName: task.name,
+              error: err.message 
+            });
+          });
+          
+          return false;
+        }
+        
+        // Additional safety: if we have ANY unmatched scheduled tasks, be extra conservative
         const hasUnmatchedScheduledTasks = shouldBeInMotion.some(t => !t.motion_task_id);
         if (hasUnmatchedScheduledTasks) {
+          logger.warn(`Motion task ${task.name} (${task.id}) could belong to unmatched scheduled task - being conservative`, {
+            unmatchedCount: shouldBeInMotion.filter(t => !t.motion_task_id).length
+          });
           return false;
         }
         
-        // Only delete if we're confident it's truly orphaned
+        // No matching scheduled task found - truly orphaned
+        logger.warn(`Motion task ${task.name} (${task.id}) appears to be truly orphaned`, {
+          scheduledTaskCount: shouldBeInMotion.length,
+          scheduledTaskNames: shouldBeInMotion.map(t => t.notion_name)
+        });
         return true;
       });
       
@@ -606,44 +647,64 @@ class PollService {
       logger.info(`Cleaning up ${safeOrphans.length} orphaned Motion tasks (older than 2 minutes)`);
       
       for (const orphan of safeOrphans) {
-        try {
-          const age = Math.round((Date.now() - new Date(orphan.createdTime).getTime()) / 60000);
-          logger.info(`Deleting orphaned Motion task: ${orphan.name}`, {
-            id: orphan.id,
-            age: `${age} minutes`
-          });
-          
-          // Delete from Motion
-          await motionClient.deleteTask(orphan.id);
-          
-          // Immediately clear the Motion ID from database and mark for recreation
-          await database.pool.query(
-            `UPDATE sync_tasks 
-             SET motion_task_id = NULL, 
-                 motion_sync_needed = true,
-                 motion_priority = 1,
-                 notion_sync_needed = true 
-             WHERE motion_task_id = $1`,
-            [orphan.id]
-          );
-          
-          logger.info(`Cleared Motion ID ${orphan.id} from database after deletion`);
-          
-          // Log cleanup
-          await database.logSync(null, orphan.id, 'orphan_cleanup', {
-            name: orphan.name,
-            age: `${age} minutes`,
-            action: 'deleted_motion_and_cleared_database'
-          });
-          
-          // Rate limit between deletions
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          
-        } catch (error) {
-          logger.error(`Failed to delete orphaned Motion task: ${orphan.name}`, {
-            error: error.message
-          });
-        }
+        const age = Math.round((Date.now() - new Date(orphan.createdTime).getTime()) / 60000);
+        
+        // Use atomic Motion operation with database update
+        await this.executeMotionOperation(
+          // Motion operation: Delete the orphaned task
+          async () => {
+            logger.info(`Deleting truly orphaned Motion task: ${orphan.name}`, {
+              id: orphan.id,
+              age: `${age} minutes`,
+              reason: 'no_corresponding_scheduled_task'
+            });
+            
+            await motionClient.deleteTask(orphan.id);
+            return orphan.id;
+          },
+          // Database update: Clear any references to this Motion ID
+          async (deletedMotionId) => {
+            // Clear Motion ID from any database records that reference it
+            const result = await database.pool.query(
+              `UPDATE sync_tasks 
+               SET motion_task_id = NULL, 
+                   motion_sync_needed = CASE 
+                     WHEN schedule_checkbox = true THEN true 
+                     ELSE false 
+                   END,
+                   notion_sync_needed = true 
+               WHERE motion_task_id = $1`,
+              [deletedMotionId]
+            );
+            
+            logger.info(`Cleared Motion ID ${deletedMotionId} from ${result.rowCount} database records`);
+            
+            // Log the cleanup action
+            await database.logSync(null, deletedMotionId, 'orphan_cleanup', {
+              name: orphan.name,
+              age: `${age} minutes`,
+              action: 'deleted_truly_orphaned_motion_task',
+              affectedRows: result.rowCount
+            });
+          },
+          // Rollback: Try to recreate the Motion task if database update fails
+          async (deletedMotionId) => {
+            logger.error(`Database update failed after deleting Motion task ${orphan.name}`, {
+              motionId: deletedMotionId,
+              action: 'attempting_rollback'
+            });
+            
+            // Note: We can't truly rollback a deleted Motion task, but we can log the issue
+            await database.logSync(null, deletedMotionId, 'orphan_cleanup_failed', {
+              name: orphan.name,
+              error: 'database_update_failed_after_deletion',
+              action: 'manual_intervention_required'
+            });
+          }
+        );
+        
+        // Rate limit between atomic operations
+        await new Promise(resolve => setTimeout(resolve, 2000));
       }
       
       logger.info(`Cleanup completed: deleted ${safeOrphans.length} orphaned Motion tasks`);
