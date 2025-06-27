@@ -8,6 +8,50 @@ class PollService {
     this.fastInterval = null;
     this.slowInterval = null;
   }
+  
+  // Execute Motion operation with database update atomically
+  async executeMotionOperation(operation, dbUpdate, rollback) {
+    let operationResult = null;
+    let dbUpdated = false;
+    
+    try {
+      // Execute Motion operation
+      operationResult = await operation();
+      
+      // Execute database update
+      try {
+        await dbUpdate(operationResult);
+        dbUpdated = true;
+      } catch (dbError) {
+        // Motion operation succeeded but DB update failed - CRITICAL
+        logger.error('CRITICAL: Motion operation succeeded but database update failed', {
+          operationResult,
+          error: dbError.message
+        });
+        
+        // Attempt rollback if provided
+        if (rollback && operationResult) {
+          try {
+            await rollback(operationResult);
+            logger.info('Rollback successful');
+          } catch (rollbackError) {
+            logger.error('Rollback failed - manual intervention required', {
+              rollbackError: rollbackError.message,
+              operationResult
+            });
+          }
+        }
+        
+        throw dbError;
+      }
+      
+      return operationResult;
+      
+    } catch (error) {
+      // If operation failed, nothing to rollback
+      throw error;
+    }
+  }
 
   start(fastIntervalSeconds = 60, slowIntervalMinutes = 3) {
     logger.info(`Starting two-speed poll service: fast=${fastIntervalSeconds}s, slow=${slowIntervalMinutes}min`);
@@ -67,7 +111,10 @@ class PollService {
       // Step 2: Process Motion operations (rate-limited)
       await this.processMotionOperations();
       
-      // Step 3: Clean up orphaned Motion tasks
+      // Step 3: Refresh Motion scheduling data for unscheduled tasks
+      await this.refreshMotionSchedulingData();
+      
+      // Step 4: Clean up orphaned Motion tasks
       await this.cleanupOrphanedMotionTasks();
       
       logger.info('=== SLOW SYNC END ===');
@@ -151,7 +198,7 @@ class PollService {
           // Update Notion with Motion fields from database
           await notionClient.updateTask(task.notion_page_id, updatePayload);
           
-          // Mark as completed
+          // Only mark as completed AFTER successful Notion update
           await database.completeNotionSync(task.notion_page_id);
           
           logger.info(`Successfully updated Notion task: ${task.notion_name}`, {
@@ -163,8 +210,11 @@ class PollService {
           
         } catch (error) {
           logger.error(`Failed to update Notion task: ${task.notion_name}`, {
-            error: error.message
+            pageId: task.notion_page_id,
+            error: error.message,
+            willRetry: true
           });
+          // Don't mark as synced - keep notion_sync_needed = true for retry
         }
       }
       
@@ -271,8 +321,35 @@ class PollService {
     const hasMotionId = !!task.motion_task_id;
     
     if (isScheduled && !hasMotionId) {
-      // CREATE: New scheduled task
-      logger.info(`Creating Motion task: ${task.notion_name}`);
+      // CREATE: New scheduled task - but first check if it already exists
+      logger.info(`Checking if Motion task already exists: ${task.notion_name}`);
+      
+      // Check if Motion already has this task (by name)
+      try {
+        const existingTasks = await motionClient.listTasks();
+        const existingTask = existingTasks.tasks.find(t => 
+          t.name.toLowerCase().trim() === task.notion_name.toLowerCase().trim()
+        );
+        
+        if (existingTask) {
+          logger.info(`Found existing Motion task, reconnecting: ${task.notion_name}`, {
+            existingMotionId: existingTask.id
+          });
+          
+          // Reconnect to existing Motion task instead of creating duplicate
+          await database.completeMotionSync(task.notion_page_id, existingTask.id);
+          
+          // Update Motion fields
+          await database.updateMotionFields(task.notion_page_id, existingTask);
+          
+          return;
+        }
+      } catch (error) {
+        logger.warn('Error checking for existing Motion tasks', { error: error.message });
+        // Continue with creation if check fails
+      }
+      
+      logger.info(`Creating new Motion task: ${task.notion_name}`);
       
       const motionTaskData = {
         name: task.notion_name,
@@ -283,32 +360,51 @@ class PollService {
         priority: task.priority
       };
       
-      const motionTask = await motionClient.createTask(motionTaskData);
-      
-      // Verify task was created (with retry on verification failure)
-      let verificationRetries = 3;
-      let taskVerified = false;
-      
-      while (verificationRetries > 0 && !taskVerified) {
-        try {
-          await motionClient.getTask(motionTask.id);
-          taskVerified = true;
-        } catch (verifyError) {
-          verificationRetries--;
-          if (verificationRetries > 0) {
-            logger.warn(`Task verification failed, retrying... (${verificationRetries} attempts left)`, {
-              motionTaskId: motionTask.id,
-              error: verifyError.message
-            });
-            await new Promise(resolve => setTimeout(resolve, 2000));
-          } else {
-            throw new Error(`Task verification failed after 3 attempts: ${verifyError.message}`);
+      // Create Motion task with atomic database update
+      const motionTask = await this.executeMotionOperation(
+        // Motion operation
+        async () => {
+          const created = await motionClient.createTask(motionTaskData);
+          
+          // Verify task was created
+          let verificationRetries = 3;
+          let taskVerified = false;
+          
+          while (verificationRetries > 0 && !taskVerified) {
+            try {
+              await motionClient.getTask(created.id);
+              taskVerified = true;
+            } catch (verifyError) {
+              verificationRetries--;
+              if (verificationRetries > 0) {
+                logger.warn(`Task verification failed, retrying...`, {
+                  motionTaskId: created.id,
+                  attemptsLeft: verificationRetries
+                });
+                await new Promise(resolve => setTimeout(resolve, 2000));
+              } else {
+                throw new Error(`Task verification failed: ${verifyError.message}`);
+              }
+            }
           }
+          
+          return created;
+        },
+        // Database update
+        async (created) => {
+          await database.completeMotionSync(task.notion_page_id, created.id);
+        },
+        // Rollback (delete Motion task if DB update fails)
+        async (created) => {
+          logger.warn('Attempting to delete Motion task due to DB failure', {
+            motionId: created.id
+          });
+          await motionClient.deleteTask(created.id);
         }
-      }
+      );
       
-      // Update database with Motion ID and mark for Notion sync
-      await database.completeMotionSync(task.notion_page_id, motionTask.id);
+      // Wait a bit for Motion's auto-scheduler to run
+      await new Promise(resolve => setTimeout(resolve, 3000));
       
       // Fetch full task details and update Motion fields
       try {
@@ -317,7 +413,8 @@ class PollService {
         logger.info(`Motion task created and fields stored: ${task.notion_name}`, { 
           motionId: motionTask.id,
           scheduledStart: fullMotionTask.scheduledStart,
-          scheduledEnd: fullMotionTask.scheduledEnd
+          scheduledEnd: fullMotionTask.scheduledEnd,
+          wasScheduled: !!fullMotionTask.scheduledStart
         });
       } catch (error) {
         logger.warn(`Created Motion task but couldn't fetch details: ${error.message}`);
@@ -339,10 +436,20 @@ class PollService {
         updateData.priority = task.priority;
       }
       
-      await motionClient.updateTask(task.motion_task_id, updateData);
-      
-      // Mark as completed
-      await database.completeMotionSync(task.notion_page_id, task.motion_task_id);
+      // Update Motion task with atomic database update
+      await this.executeMotionOperation(
+        // Motion operation
+        async () => {
+          await motionClient.updateTask(task.motion_task_id, updateData);
+          return task.motion_task_id;
+        },
+        // Database update
+        async () => {
+          await database.completeMotionSync(task.notion_page_id, task.motion_task_id);
+        },
+        // No rollback for updates - can't undo Motion update
+        null
+      );
       
       // Fetch updated task details and update Motion fields
       try {
@@ -360,39 +467,36 @@ class PollService {
       // DELETE: Unscheduled task with Motion ID
       logger.info(`Deleting Motion task: ${task.notion_name}`);
       
-      try {
-        await motionClient.deleteTask(task.motion_task_id);
-        
-        // Clear Motion ID from database and mark for Notion sync
-        await database.completeMotionSync(task.notion_page_id, null);
-        
-        logger.info(`Motion task deleted: ${task.notion_name}`);
-      } catch (error) {
-        logger.error(`Failed to delete Motion task: ${task.notion_name}`, {
-          motionId: task.motion_task_id,
-          error: error.message
-        });
-        
-        // If Motion deletion succeeded but DB update failed, we need to clear the ID
-        // Check if task still exists in Motion
-        try {
-          await motionClient.getTask(task.motion_task_id);
-          // Task still exists, deletion failed
-          throw error;
-        } catch (checkError) {
-          if (checkError.response?.status === 404) {
-            // Task is gone from Motion but DB still has ID - critical inconsistency
-            logger.error('CRITICAL: Motion task deleted but database update failed', {
-              task: task.notion_name,
-              motionId: task.motion_task_id
+      // Delete Motion task with atomic database update
+      await this.executeMotionOperation(
+        // Motion operation
+        async () => {
+          await motionClient.deleteTask(task.motion_task_id);
+          return task.motion_task_id;
+        },
+        // Database update
+        async () => {
+          await database.completeMotionSync(task.notion_page_id, null);
+        },
+        // Rollback - check if task was actually deleted
+        async (motionId) => {
+          try {
+            await motionClient.getTask(motionId);
+            // Task still exists, deletion may have failed
+            logger.error('Motion task still exists after delete attempt', {
+              motionId
             });
-            // Try to clear the ID again
-            await database.completeMotionSync(task.notion_page_id, null);
-          } else {
-            throw error;
+          } catch (checkError) {
+            if (checkError.response?.status === 404) {
+              // Task is gone, try to update DB again
+              logger.info('Motion task confirmed deleted, retrying DB update');
+              await database.completeMotionSync(task.notion_page_id, null);
+            }
           }
         }
-      }
+      );
+      
+      logger.info(`Motion task deleted: ${task.notion_name}`);
       
     } else {
       // No operation needed
@@ -552,6 +656,60 @@ class PollService {
       
     } catch (error) {
       logger.error('Error during Motion cleanup', { error: error.message });
+    }
+  }
+  
+  // Refresh Motion scheduling data for tasks that Motion may have auto-scheduled
+  async refreshMotionSchedulingData() {
+    try {
+      logger.info('Checking for Motion scheduling updates...');
+      
+      const unscheduledTasks = await database.all(`
+        SELECT notion_page_id, notion_name, motion_task_id 
+        FROM sync_tasks 
+        WHERE motion_task_id IS NOT NULL 
+        AND motion_scheduled_start IS NULL
+        AND schedule_checkbox = true
+      `);
+      
+      if (unscheduledTasks.length === 0) {
+        return;
+      }
+      
+      logger.info(`Found ${unscheduledTasks.length} tasks to check for scheduling updates`);
+      
+      let updatedCount = 0;
+      for (const task of unscheduledTasks) {
+        try {
+          const motionTask = await motionClient.getTask(task.motion_task_id);
+          
+          if (motionTask.scheduledStart || motionTask.scheduledEnd) {
+            await database.updateMotionFields(task.notion_page_id, motionTask);
+            updatedCount++;
+            logger.info(`Updated scheduling for: ${task.notion_name}`, {
+              scheduledStart: motionTask.scheduledStart,
+              scheduledEnd: motionTask.scheduledEnd
+            });
+          }
+        } catch (error) {
+          if (error.response?.status === 404) {
+            logger.warn(`Motion task not found for: ${task.notion_name}`, {
+              motionId: task.motion_task_id
+            });
+          } else {
+            logger.error(`Error checking Motion task: ${task.notion_name}`, {
+              error: error.message
+            });
+          }
+        }
+      }
+      
+      if (updatedCount > 0) {
+        logger.info(`Updated scheduling data for ${updatedCount} tasks`);
+      }
+      
+    } catch (error) {
+      logger.error('Error refreshing Motion scheduling data', { error: error.message });
     }
   }
   

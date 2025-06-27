@@ -1,9 +1,11 @@
 const { Pool } = require('pg');
 const logger = require('../utils/logger');
+const TransactionWrapper = require('./transactionWrapper');
 
 class DatabaseWrapper {
   constructor() {
     this.pool = null;
+    this.transaction = null;
     this.initialized = false;
   }
 
@@ -31,6 +33,9 @@ class DatabaseWrapper {
         });
       }
 
+      // Initialize transaction wrapper
+      this.transaction = new TransactionWrapper(this.pool);
+      
       // Test connection
       await this.pool.query('SELECT NOW()');
       logger.info('PostgreSQL connected successfully');
@@ -484,48 +489,84 @@ class DatabaseWrapper {
 
   // Complete Motion operation
   async completeMotionSync(notionPageId, motionTaskId = null) {
-    const query = `
-      UPDATE sync_tasks 
-      SET motion_sync_needed = false,
-          motion_last_attempt = CURRENT_TIMESTAMP,
-          motion_task_id = $1,
-          notion_sync_needed = true
-      WHERE notion_page_id = $2
-    `;
-    await this.pool.query(query, [motionTaskId, notionPageId]);
+    try {
+      const query = `
+        UPDATE sync_tasks 
+        SET motion_sync_needed = false,
+            motion_last_attempt = CURRENT_TIMESTAMP,
+            motion_task_id = $1,
+            notion_sync_needed = true
+        WHERE notion_page_id = $2
+      `;
+      const result = await this.pool.query(query, [motionTaskId, notionPageId]);
+      
+      if (result.rowCount === 0) {
+        throw new Error(`No task found with notion_page_id: ${notionPageId}`);
+      }
+      
+      logger.info('Motion sync completed', { 
+        notionPageId, 
+        motionTaskId,
+        action: motionTaskId ? 'stored' : 'cleared'
+      });
+    } catch (error) {
+      logger.error('CRITICAL: Failed to update Motion ID in database', {
+        notionPageId,
+        motionTaskId,
+        error: error.message
+      });
+      throw error;
+    }
   }
   
   // Update Motion fields from Motion API response
   async updateMotionFields(notionPageId, motionData) {
-    const query = `
-      UPDATE sync_tasks 
-      SET motion_start_on = $1,
-          motion_scheduled_start = $2,
-          motion_scheduled_end = $3,
-          motion_scheduling_issue = $4,
-          motion_status_name = $5,
-          motion_status_resolved = $6,
-          motion_completed = $7,
-          motion_completed_time = $8,
-          motion_deadline_type = $9,
-          motion_updated_time = $10,
-          notion_sync_needed = true
-      WHERE notion_page_id = $11
-    `;
-    
-    await this.pool.query(query, [
-      motionData.startOn || null,
-      motionData.scheduledStart || null,
-      motionData.scheduledEnd || null,
-      motionData.schedulingIssue || false,
-      motionData.status?.name || null,
-      motionData.status?.isResolvedStatus || false,
-      motionData.completed || false,
-      motionData.completedTime || null,
-      motionData.deadlineType || null,
-      motionData.updatedTime || null,
-      notionPageId
-    ]);
+    try {
+      const query = `
+        UPDATE sync_tasks 
+        SET motion_start_on = $1,
+            motion_scheduled_start = $2,
+            motion_scheduled_end = $3,
+            motion_scheduling_issue = $4,
+            motion_status_name = $5,
+            motion_status_resolved = $6,
+            motion_completed = $7,
+            motion_completed_time = $8,
+            motion_deadline_type = $9,
+            motion_updated_time = $10,
+            notion_sync_needed = true
+        WHERE notion_page_id = $11
+      `;
+      
+      const result = await this.pool.query(query, [
+        motionData.startOn || null,
+        motionData.scheduledStart || null,
+        motionData.scheduledEnd || null,
+        motionData.schedulingIssue || false,
+        motionData.status?.name || null,
+        motionData.status?.isResolvedStatus || false,
+        motionData.completed || false,
+        motionData.completedTime || null,
+        motionData.deadlineType || null,
+        motionData.updatedTime || null,
+        notionPageId
+      ]);
+      
+      if (result.rowCount === 0) {
+        throw new Error(`No task found with notion_page_id: ${notionPageId}`);
+      }
+      
+      logger.info('Motion fields updated', {
+        notionPageId,
+        hasScheduling: !!motionData.scheduledStart
+      });
+    } catch (error) {
+      logger.error('Failed to update Motion fields', {
+        notionPageId,
+        error: error.message
+      });
+      throw error;
+    }
   }
 
   // Complete Notion update

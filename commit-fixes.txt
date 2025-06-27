@@ -1,0 +1,30 @@
+Implement critical sync reliability fixes
+
+Based on production issues discovered:
+
+1. Fix "false positive" syncs
+   - Only mark notion_sync_needed=false AFTER successful Notion update
+   - Keep failed syncs eligible for retry
+
+2. Add Motion scheduling data refresh
+   - Check unscheduled tasks during slow sync
+   - Pull scheduling data after Motion auto-scheduler runs
+   - Wait 3s after task creation for Motion scheduler
+
+3. Prevent duplicate Motion task creation
+   - Check if Motion task exists by name before creating
+   - Reconnect to existing tasks instead of creating duplicates
+
+4. Add error handling to database operations
+   - Log and throw errors instead of failing silently
+   - Verify row updates succeeded
+
+5. Already fixed:
+   - Notion rich_text clearing (empty array vs empty string)
+   - Dangerous "clear all when 0" cleanup removed
+
+These fixes prevent cascade failures and ensure data consistency.
+
+🤖 Generated with [Claude Code](https://claude.ai/code)
+
+Co-Authored-By: Claude <noreply@anthropic.com>
