@@ -1,0 +1,12 @@
+Add enhanced logging to debug Motion fields sync issue
+
+- Add detailed logging in syncDatabaseToNotion to show update payloads
+- Add logging in notionClient.updateTask to show what properties are sent
+- Change log level from debug to info for successful Notion updates
+- Log Motion fields presence and actual values being sent
+
+This will help identify why Motion fields aren't appearing in Notion despite being in the database.
+
+🤖 Generated with [Claude Code](https://claude.ai/code)
+
+Co-Authored-By: Claude <noreply@anthropic.com>

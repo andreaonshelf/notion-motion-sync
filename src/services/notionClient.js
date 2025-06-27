@@ -23,15 +23,39 @@ class NotionClient {
   async updateTask(pageId, taskData) {
     try {
       const properties = this.buildProperties(taskData);
+      
+      // Log Motion fields being sent
+      const motionFieldsInUpdate = {};
+      if (properties['Motion Task ID']) motionFieldsInUpdate.motionTaskId = properties['Motion Task ID'];
+      if (properties['Motion Start On']) motionFieldsInUpdate.motionStartOn = properties['Motion Start On'];
+      if (properties['Motion Scheduled Start']) motionFieldsInUpdate.motionScheduledStart = properties['Motion Scheduled Start'];
+      if (properties['Motion Scheduled End']) motionFieldsInUpdate.motionScheduledEnd = properties['Motion Scheduled End'];
+      if (properties['Motion Status']) motionFieldsInUpdate.motionStatus = properties['Motion Status'];
+      if (properties['Motion Scheduling Issue']) motionFieldsInUpdate.motionSchedulingIssue = properties['Motion Scheduling Issue'];
+      if (properties['Motion Completed']) motionFieldsInUpdate.motionCompleted = properties['Motion Completed'];
+      if (properties['Motion Deadline Type']) motionFieldsInUpdate.motionDeadlineType = properties['Motion Deadline Type'];
+      
+      logger.info('Updating task in Notion', { 
+        pageId,
+        taskDataReceived: taskData,
+        motionFieldsInUpdate,
+        allProperties: Object.keys(properties)
+      });
+      
       const response = await this.client.pages.update({
         page_id: pageId,
         properties
       });
       
-      logger.info('Task updated in Notion', { pageId });
+      logger.info('Task updated in Notion successfully', { pageId });
       return this.parseTask(response);
     } catch (error) {
-      logger.error('Error updating task in Notion', { pageId, error: error.message });
+      logger.error('Error updating task in Notion', { 
+        pageId, 
+        error: error.message,
+        errorBody: error.body,
+        taskData 
+      });
       throw error;
     }
   }

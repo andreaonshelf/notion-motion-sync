@@ -129,8 +129,8 @@ class PollService {
       
       for (const task of tasksToUpdate) {
         try {
-          // Update Notion with Motion fields from database
-          await notionClient.updateTask(task.notion_page_id, {
+          // Log what we're about to send
+          const updatePayload = {
             motionTaskId: task.motion_task_id || '',
             motionStartOn: task.motion_start_on,
             motionScheduledStart: task.motion_scheduled_start,
@@ -139,12 +139,22 @@ class PollService {
             motionSchedulingIssue: task.motion_scheduling_issue,
             motionCompleted: task.motion_completed,
             motionDeadlineType: task.motion_deadline_type
+          };
+          
+          logger.info(`Updating Notion task: ${task.notion_name}`, {
+            pageId: task.notion_page_id,
+            motionId: task.motion_task_id,
+            hasMotionFields: !!task.motion_scheduled_start || !!task.motion_scheduled_end,
+            updatePayload
           });
+          
+          // Update Notion with Motion fields from database
+          await notionClient.updateTask(task.notion_page_id, updatePayload);
           
           // Mark as completed
           await database.completeNotionSync(task.notion_page_id);
           
-          logger.debug(`Updated Notion task: ${task.notion_name}`, {
+          logger.info(`Successfully updated Notion task: ${task.notion_name}`, {
             motionId: task.motion_task_id
           });
           
