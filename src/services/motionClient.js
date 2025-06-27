@@ -109,7 +109,14 @@ class MotionClient {
         payload.labels = taskData.labels;
       }
       
-      logger.info('Creating Motion task with payload', { payload });
+      // Add auto-scheduling configuration
+      payload.autoScheduled = {
+        startDate: new Date().toISOString().split('T')[0], // Today
+        deadlineType: 'HARD',
+        schedule: 'WORK_HOURS'
+      };
+      
+      logger.info('Creating Motion task with auto-scheduling', { payload });
       
       const response = await this.client.post('/tasks', payload);
       
@@ -187,7 +194,15 @@ class MotionClient {
         }
       }
       
-      logger.info('Updating Motion task', { 
+      // Add auto-scheduling configuration for updates
+      // This ensures Motion re-schedules the task if duration/dates changed
+      updatePayload.autoScheduled = {
+        startDate: new Date().toISOString().split('T')[0], // Today
+        deadlineType: 'HARD',
+        schedule: 'WORK_HOURS'
+      };
+      
+      logger.info('Updating Motion task with auto-scheduling', { 
         taskId, 
         payload: updatePayload,
         hasDuration: 'duration' in updatePayload,
