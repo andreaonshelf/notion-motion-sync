@@ -147,8 +147,8 @@ class PollService {
       // Step 4: Refresh Motion scheduling data AGAIN (catch just-created tasks)
       await this.refreshMotionSchedulingData();
       
-      // Step 5: Clean up orphaned Motion tasks
-      await this.cleanupOrphanedMotionTasks();
+      // Step 5: Clean up orphaned Motion tasks - TEMPORARILY DISABLED
+      // await this.cleanupOrphanedMotionTasks();
       
       logger.info('=== SLOW SYNC END ===');
     } catch (error) {
