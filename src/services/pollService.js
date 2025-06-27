@@ -383,7 +383,39 @@ class PollService {
       const motionTasks = motionResponse.tasks || [];
       
       if (motionTasks.length === 0) {
-        logger.info('No Motion tasks found, skipping cleanup');
+        logger.info('No Motion tasks found');
+        
+        // Still need to clear ALL phantom Motion IDs when Motion is empty
+        const dbTasksWithMotionIds = await database.all(
+          'SELECT notion_page_id, notion_name, motion_task_id FROM sync_tasks WHERE motion_task_id IS NOT NULL'
+        );
+        
+        if (dbTasksWithMotionIds.length > 0) {
+          logger.info(`Motion is empty but database has ${dbTasksWithMotionIds.length} Motion IDs - clearing all`);
+          
+          for (const task of dbTasksWithMotionIds) {
+            await database.pool.query(
+              `UPDATE sync_tasks 
+               SET motion_task_id = NULL,
+                   motion_sync_needed = CASE 
+                     WHEN schedule_checkbox = true THEN true 
+                     ELSE motion_sync_needed 
+                   END,
+                   motion_priority = CASE 
+                     WHEN schedule_checkbox = true THEN 1 
+                     ELSE motion_priority 
+                   END,
+                   notion_sync_needed = true
+               WHERE notion_page_id = $1`,
+              [task.notion_page_id]
+            );
+            
+            logger.info(`Cleared phantom Motion ID for: ${task.notion_name}`, {
+              phantomId: task.motion_task_id
+            });
+          }
+        }
+        
         return;
       }
       
@@ -479,6 +511,49 @@ class PollService {
       }
       
       logger.info(`Cleanup completed: deleted ${safeOrphans.length} orphaned Motion tasks`);
+      
+      // SECOND CLEANUP: Clear phantom Motion IDs from database
+      // (Motion IDs that exist in database but not in Motion)
+      const dbTasksWithMotionIds = await database.all(
+        'SELECT notion_page_id, notion_name, motion_task_id FROM sync_tasks WHERE motion_task_id IS NOT NULL'
+      );
+      
+      const actualMotionIds = new Set(motionTasks.map(t => t.id));
+      const phantomTasks = dbTasksWithMotionIds.filter(t => !actualMotionIds.has(t.motion_task_id));
+      
+      if (phantomTasks.length > 0) {
+        logger.info(`Found ${phantomTasks.length} phantom Motion IDs in database`);
+        
+        for (const phantom of phantomTasks) {
+          logger.info(`Clearing phantom Motion ID for: ${phantom.notion_name}`, {
+            phantomId: phantom.motion_task_id
+          });
+          
+          // Clear the phantom Motion ID and mark for recreation if scheduled
+          await database.pool.query(
+            `UPDATE sync_tasks 
+             SET motion_task_id = NULL,
+                 motion_sync_needed = CASE 
+                   WHEN schedule_checkbox = true THEN true 
+                   ELSE motion_sync_needed 
+                 END,
+                 motion_priority = CASE 
+                   WHEN schedule_checkbox = true THEN 1 
+                   ELSE motion_priority 
+                 END,
+                 notion_sync_needed = true
+             WHERE notion_page_id = $1`,
+            [phantom.notion_page_id]
+          );
+          
+          await database.logSync(phantom.notion_page_id, phantom.motion_task_id, 'phantom_cleanup', {
+            name: phantom.notion_name,
+            action: 'cleared_phantom_motion_id'
+          });
+        }
+        
+        logger.info(`Cleared ${phantomTasks.length} phantom Motion IDs from database`);
+      }
       
     } catch (error) {
       logger.error('Error during Motion cleanup', { error: error.message });

@@ -123,8 +123,8 @@ const start = async () => {
       });
       
       // Start polling for Motion changes only (since Motion doesn't have webhooks)
-      pollService.start(3);
-      logger.info('Polling service started for Motion (3 minute interval)');
+      pollService.start(60, 3); // 60 seconds fast sync, 3 minutes slow sync
+      logger.info('Polling service started: fast sync (60s), slow sync (3min)');
       logger.info('Notion updates via polling (webhooks disabled)');
       
       // On startup, sync any Notion tasks that don't have Motion IDs

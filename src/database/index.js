@@ -205,6 +205,13 @@ class DatabaseWrapper {
         priority = EXCLUDED.priority,
         start_on = EXCLUDED.start_on,
         updated_at = CURRENT_TIMESTAMP
+      WHERE sync_tasks.notion_last_edited IS DISTINCT FROM EXCLUDED.notion_last_edited
+        OR sync_tasks.schedule_checkbox IS DISTINCT FROM EXCLUDED.schedule_checkbox
+        OR sync_tasks.duration IS DISTINCT FROM EXCLUDED.duration
+        OR sync_tasks.due_date IS DISTINCT FROM EXCLUDED.due_date
+        OR sync_tasks.status IS DISTINCT FROM EXCLUDED.status
+        OR sync_tasks.priority IS DISTINCT FROM EXCLUDED.priority
+        OR sync_tasks.start_on IS DISTINCT FROM EXCLUDED.start_on
       RETURNING *;
     `;
     

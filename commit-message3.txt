@@ -1,0 +1,9 @@
+Fix Motion fields not syncing to Notion - preserve sync flags
+
+The issue was that upsertSyncTask was overwriting ALL fields including notion_sync_needed flag every time Notion → Database sync ran. This meant Motion fields updates that set notion_sync_needed=true were immediately overwritten back to false.
+
+Fixed by adding WHERE clause to only update when Notion data actually changes, preserving flags like notion_sync_needed that are set by other operations.
+
+🤖 Generated with [Claude Code](https://claude.ai/code)
+
+Co-Authored-By: Claude <noreply@anthropic.com>
