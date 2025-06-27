@@ -138,8 +138,10 @@ class PollService {
       let updatedCount = 0;
       
       // Update database with ALL task data
+      let mismatchCount = 0;
+      
       for (const task of notionTasks) {
-        const oldTask = await database.getMappingByNotionId(task.id);
+        const dbTask = await database.getMappingByNotionId(task.id);
         
         await database.upsertSyncTask(task.id, {
           name: task.name,
@@ -152,13 +154,34 @@ class PollService {
           startOn: task.startOn
         });
         
-        // NEVER import Motion IDs from Notion - they only flow Motion → Database → Notion
-        // Motion IDs are only set by Motion API responses, never from Notion data
+        // Check for Motion ID mismatches between Notion and Database
+        const notionMotionId = task.motionTaskId || null;
+        const dbMotionId = dbTask?.motion_task_id || null;
+        
+        if (notionMotionId !== dbMotionId) {
+          mismatchCount++;
+          logger.warn('Motion ID mismatch detected', {
+            taskName: task.name,
+            notionPageId: task.id,
+            notionMotionId: notionMotionId || 'null',
+            dbMotionId: dbMotionId || 'null',
+            action: 'will_sync_from_database'
+          });
+          
+          // Mark this task as needing Notion sync to push correct Motion ID
+          await database.run(
+            'UPDATE sync_tasks SET notion_sync_needed = true WHERE notion_page_id = $1',
+            [task.id]
+          );
+        }
         
         updatedCount++;
       }
       
-      logger.info(`Updated ${updatedCount} tasks in database`);
+      logger.info(`Updated ${updatedCount} tasks in database`, {
+        mismatchesFound: mismatchCount,
+        mismatchesWillBeFixed: mismatchCount > 0
+      });
       
     } catch (error) {
       logger.error('Error syncing Notion to database', { error: error.message });
@@ -193,9 +216,10 @@ class PollService {
           
           logger.info(`Updating Notion task: ${task.notion_name}`, {
             pageId: task.notion_page_id,
-            motionId: task.motion_task_id,
+            motionId: task.motion_task_id || 'CLEARING',
             hasMotionFields: !!task.motion_scheduled_start || !!task.motion_scheduled_end,
-            updatePayload
+            updatePayload,
+            isClearingPhantomId: !task.motion_task_id && updatePayload.motionTaskId === ''
           });
           
           // Update Notion with Motion fields from database
