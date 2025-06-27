@@ -98,7 +98,8 @@ class PollService {
           duration: task.duration,
           dueDate: task.dueDate,
           status: task.status,
-          priority: task.priority
+          priority: task.priority,
+          startOn: task.startOn
         });
         
         // NEVER import Motion IDs from Notion - they only flow Motion → Database → Notion
@@ -128,9 +129,16 @@ class PollService {
       
       for (const task of tasksToUpdate) {
         try {
-          // Update Notion with Motion ID from database
+          // Update Notion with Motion fields from database
           await notionClient.updateTask(task.notion_page_id, {
-            motionTaskId: task.motion_task_id || ''
+            motionTaskId: task.motion_task_id || '',
+            motionStartOn: task.motion_start_on,
+            motionScheduledStart: task.motion_scheduled_start,
+            motionScheduledEnd: task.motion_scheduled_end,
+            motionStatus: task.motion_status_name,
+            motionSchedulingIssue: task.motion_scheduling_issue,
+            motionCompleted: task.motion_completed,
+            motionDeadlineType: task.motion_deadline_type
           });
           
           // Mark as completed
@@ -260,6 +268,7 @@ class PollService {
         name: task.notion_name,
         duration: task.duration,
         dueDate: task.due_date,
+        startOn: task.start_on,
         status: 'Not started',
         priority: task.priority
       };
@@ -291,7 +300,18 @@ class PollService {
       // Update database with Motion ID and mark for Notion sync
       await database.completeMotionSync(task.notion_page_id, motionTask.id);
       
-      logger.info(`Motion task created: ${task.notion_name}`, { motionId: motionTask.id });
+      // Fetch full task details and update Motion fields
+      try {
+        const fullMotionTask = await motionClient.getTask(motionTask.id);
+        await database.updateMotionFields(task.notion_page_id, fullMotionTask);
+        logger.info(`Motion task created and fields stored: ${task.notion_name}`, { 
+          motionId: motionTask.id,
+          scheduledStart: fullMotionTask.scheduledStart,
+          scheduledEnd: fullMotionTask.scheduledEnd
+        });
+      } catch (error) {
+        logger.warn(`Created Motion task but couldn't fetch details: ${error.message}`);
+      }
       
     } else if (isScheduled && hasMotionId) {
       // UPDATE: Existing Motion task
@@ -300,7 +320,8 @@ class PollService {
       const updateData = {
         name: task.notion_name,
         duration: task.duration,
-        dueDate: task.due_date
+        dueDate: task.due_date,
+        startOn: task.start_on
       };
       
       // Only add priority if it exists
@@ -313,7 +334,17 @@ class PollService {
       // Mark as completed
       await database.completeMotionSync(task.notion_page_id, task.motion_task_id);
       
-      logger.info(`Motion task updated: ${task.notion_name}`);
+      // Fetch updated task details and update Motion fields
+      try {
+        const fullMotionTask = await motionClient.getTask(task.motion_task_id);
+        await database.updateMotionFields(task.notion_page_id, fullMotionTask);
+        logger.info(`Motion task updated and fields stored: ${task.notion_name}`, { 
+          scheduledStart: fullMotionTask.scheduledStart,
+          scheduledEnd: fullMotionTask.scheduledEnd
+        });
+      } catch (error) {
+        logger.warn(`Updated Motion task but couldn't fetch details: ${error.message}`);
+      }
       
     } else if (!isScheduled && hasMotionId) {
       // DELETE: Unscheduled task with Motion ID

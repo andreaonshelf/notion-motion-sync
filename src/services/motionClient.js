@@ -99,6 +99,11 @@ class MotionClient {
         }
       }
       
+      // Only add startOn if specified
+      if (taskData.startOn) {
+        payload.startOn = taskData.startOn;
+      }
+      
       // Only add labels if they exist and are not empty
       if (taskData.labels && taskData.labels.length > 0) {
         payload.labels = taskData.labels;
@@ -152,6 +157,10 @@ class MotionClient {
       
       if (taskData.dueDate !== undefined) {
         updatePayload.dueDate = taskData.dueDate;
+      }
+      
+      if (taskData.startOn !== undefined) {
+        updatePayload.startOn = taskData.startOn;
       }
       
       if (taskData.priority !== undefined) {

@@ -141,6 +141,22 @@ class DatabaseWrapper {
         ADD COLUMN IF NOT EXISTS priority TEXT;
       `);
       
+      // Add new Motion sync fields
+      await this.pool.query(`
+        ALTER TABLE sync_tasks 
+        ADD COLUMN IF NOT EXISTS start_on DATE,
+        ADD COLUMN IF NOT EXISTS motion_start_on DATE,
+        ADD COLUMN IF NOT EXISTS motion_scheduled_start TIMESTAMP,
+        ADD COLUMN IF NOT EXISTS motion_scheduled_end TIMESTAMP,
+        ADD COLUMN IF NOT EXISTS motion_scheduling_issue BOOLEAN DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS motion_status_name TEXT,
+        ADD COLUMN IF NOT EXISTS motion_status_resolved BOOLEAN DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS motion_completed BOOLEAN DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS motion_completed_time TIMESTAMP,
+        ADD COLUMN IF NOT EXISTS motion_deadline_type TEXT,
+        ADD COLUMN IF NOT EXISTS motion_updated_time TIMESTAMP;
+      `);
+      
       // Add multi-speed sync fields
       await this.pool.query(`
         ALTER TABLE sync_tasks 
@@ -175,9 +191,10 @@ class DatabaseWrapper {
         duration,
         due_date,
         status,
-        priority
+        priority,
+        start_on
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       ON CONFLICT(notion_page_id) DO UPDATE SET
         notion_name = EXCLUDED.notion_name,
         notion_last_edited = EXCLUDED.notion_last_edited,
@@ -186,6 +203,7 @@ class DatabaseWrapper {
         due_date = EXCLUDED.due_date,
         status = EXCLUDED.status,
         priority = EXCLUDED.priority,
+        start_on = EXCLUDED.start_on,
         updated_at = CURRENT_TIMESTAMP
       RETURNING *;
     `;
@@ -198,7 +216,8 @@ class DatabaseWrapper {
       data.duration || null,
       data.dueDate || null,
       data.status || null,
-      data.priority || null
+      data.priority || null,
+      data.startOn || null
     ]);
     
     return result.rows[0];
@@ -467,6 +486,39 @@ class DatabaseWrapper {
       WHERE notion_page_id = $2
     `;
     await this.pool.query(query, [motionTaskId, notionPageId]);
+  }
+  
+  // Update Motion fields from Motion API response
+  async updateMotionFields(notionPageId, motionData) {
+    const query = `
+      UPDATE sync_tasks 
+      SET motion_start_on = $1,
+          motion_scheduled_start = $2,
+          motion_scheduled_end = $3,
+          motion_scheduling_issue = $4,
+          motion_status_name = $5,
+          motion_status_resolved = $6,
+          motion_completed = $7,
+          motion_completed_time = $8,
+          motion_deadline_type = $9,
+          motion_updated_time = $10,
+          notion_sync_needed = true
+      WHERE notion_page_id = $11
+    `;
+    
+    await this.pool.query(query, [
+      motionData.startOn || null,
+      motionData.scheduledStart || null,
+      motionData.scheduledEnd || null,
+      motionData.schedulingIssue || false,
+      motionData.status?.name || null,
+      motionData.status?.isResolvedStatus || false,
+      motionData.completed || false,
+      motionData.completedTime || null,
+      motionData.deadlineType || null,
+      motionData.updatedTime || null,
+      notionPageId
+    ]);
   }
 
   // Complete Notion update

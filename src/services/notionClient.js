@@ -126,6 +126,7 @@ class NotionClient {
       dueDate: properties['Due date']?.date?.start || null,
       duration: properties['Duration (minutes)']?.number || null,
       schedule: properties.Schedule?.checkbox || false,
+      startOn: properties['Start On']?.date?.start || null,
       motionTaskId: properties['Motion Task ID']?.rich_text?.[0]?.plain_text || null,
       lastSynced: null,
       lastEdited: page.last_edited_time,
@@ -188,6 +189,53 @@ class NotionClient {
     if (taskData.motionTaskId !== undefined) {
       properties['Motion Task ID'] = {
         rich_text: [{ text: { content: taskData.motionTaskId } }]
+      };
+    }
+    
+    // Motion read-only fields
+    if (taskData.motionStartOn !== undefined) {
+      properties['Motion Start On'] = {
+        date: taskData.motionStartOn ? { start: taskData.motionStartOn } : null
+      };
+    }
+    
+    if (taskData.motionScheduledStart !== undefined) {
+      properties['Motion Scheduled Start'] = {
+        date: taskData.motionScheduledStart ? { 
+          start: new Date(taskData.motionScheduledStart).toISOString() 
+        } : null
+      };
+    }
+    
+    if (taskData.motionScheduledEnd !== undefined) {
+      properties['Motion Scheduled End'] = {
+        date: taskData.motionScheduledEnd ? { 
+          start: new Date(taskData.motionScheduledEnd).toISOString() 
+        } : null
+      };
+    }
+    
+    if (taskData.motionStatus !== undefined) {
+      properties['Motion Status'] = {
+        rich_text: [{ text: { content: taskData.motionStatus || '' } }]
+      };
+    }
+    
+    if (taskData.motionSchedulingIssue !== undefined) {
+      properties['Motion Scheduling Issue'] = {
+        checkbox: taskData.motionSchedulingIssue || false
+      };
+    }
+    
+    if (taskData.motionCompleted !== undefined) {
+      properties['Motion Completed'] = {
+        checkbox: taskData.motionCompleted || false
+      };
+    }
+    
+    if (taskData.motionDeadlineType !== undefined) {
+      properties['Motion Deadline Type'] = {
+        select: taskData.motionDeadlineType ? { name: taskData.motionDeadlineType } : null
       };
     }
     

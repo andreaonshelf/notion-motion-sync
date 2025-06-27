@@ -90,6 +90,9 @@ app.use('/diagnostic', diagnosticRoutes);
 app.use('/debug', debugRoutes);
 app.use('/manual', manualSyncRoutes);
 app.use('/debug-scheduled', require('./routes/debug-scheduled-tasks'));
+app.use('/motion-test', require('./routes/motion-api-test'));
+app.use('/motion-fields', require('./routes/motion-fields-diagnostic'));
+app.use('/test-flow', require('./routes/test-motion-fields-flow'));
 
 app.use((req, res) => {
   res.status(404).json({ error: 'Not found' });
