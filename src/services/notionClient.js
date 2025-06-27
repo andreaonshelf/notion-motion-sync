@@ -211,9 +211,16 @@ class NotionClient {
     }
     
     if (taskData.motionTaskId !== undefined) {
-      properties['Motion Task ID'] = {
-        rich_text: [{ text: { content: taskData.motionTaskId } }]
-      };
+      // To clear the field in Notion, send empty array, not empty string
+      if (taskData.motionTaskId === '' || taskData.motionTaskId === null) {
+        properties['Motion Task ID'] = {
+          rich_text: []
+        };
+      } else {
+        properties['Motion Task ID'] = {
+          rich_text: [{ text: { content: taskData.motionTaskId } }]
+        };
+      }
     }
     
     // Motion read-only fields

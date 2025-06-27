@@ -360,12 +360,39 @@ class PollService {
       // DELETE: Unscheduled task with Motion ID
       logger.info(`Deleting Motion task: ${task.notion_name}`);
       
-      await motionClient.deleteTask(task.motion_task_id);
-      
-      // Clear Motion ID from database and mark for Notion sync
-      await database.completeMotionSync(task.notion_page_id, null);
-      
-      logger.info(`Motion task deleted: ${task.notion_name}`);
+      try {
+        await motionClient.deleteTask(task.motion_task_id);
+        
+        // Clear Motion ID from database and mark for Notion sync
+        await database.completeMotionSync(task.notion_page_id, null);
+        
+        logger.info(`Motion task deleted: ${task.notion_name}`);
+      } catch (error) {
+        logger.error(`Failed to delete Motion task: ${task.notion_name}`, {
+          motionId: task.motion_task_id,
+          error: error.message
+        });
+        
+        // If Motion deletion succeeded but DB update failed, we need to clear the ID
+        // Check if task still exists in Motion
+        try {
+          await motionClient.getTask(task.motion_task_id);
+          // Task still exists, deletion failed
+          throw error;
+        } catch (checkError) {
+          if (checkError.response?.status === 404) {
+            // Task is gone from Motion but DB still has ID - critical inconsistency
+            logger.error('CRITICAL: Motion task deleted but database update failed', {
+              task: task.notion_name,
+              motionId: task.motion_task_id
+            });
+            // Try to clear the ID again
+            await database.completeMotionSync(task.notion_page_id, null);
+          } else {
+            throw error;
+          }
+        }
+      }
       
     } else {
       // No operation needed
@@ -383,39 +410,7 @@ class PollService {
       const motionTasks = motionResponse.tasks || [];
       
       if (motionTasks.length === 0) {
-        logger.info('No Motion tasks found');
-        
-        // Still need to clear ALL phantom Motion IDs when Motion is empty
-        const dbTasksWithMotionIds = await database.all(
-          'SELECT notion_page_id, notion_name, motion_task_id FROM sync_tasks WHERE motion_task_id IS NOT NULL'
-        );
-        
-        if (dbTasksWithMotionIds.length > 0) {
-          logger.info(`Motion is empty but database has ${dbTasksWithMotionIds.length} Motion IDs - clearing all`);
-          
-          for (const task of dbTasksWithMotionIds) {
-            await database.pool.query(
-              `UPDATE sync_tasks 
-               SET motion_task_id = NULL,
-                   motion_sync_needed = CASE 
-                     WHEN schedule_checkbox = true THEN true 
-                     ELSE motion_sync_needed 
-                   END,
-                   motion_priority = CASE 
-                     WHEN schedule_checkbox = true THEN 1 
-                     ELSE motion_priority 
-                   END,
-                   notion_sync_needed = true
-               WHERE notion_page_id = $1`,
-              [task.notion_page_id]
-            );
-            
-            logger.info(`Cleared phantom Motion ID for: ${task.notion_name}`, {
-              phantomId: task.motion_task_id
-            });
-          }
-        }
-        
+        logger.warn('Motion API returned 0 tasks - this might be an API issue, not clearing Motion IDs');
         return;
       }
       
