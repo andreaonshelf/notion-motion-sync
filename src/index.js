@@ -102,6 +102,7 @@ app.use('/force-clear', require('./routes/force-clear-motion-ids'));
 app.use('/check-motion', require('./routes/check-motion-tasks'));
 app.use('/check-ai-forge', require('./routes/check-ai-forge-status'));
 app.use('/motion-refresh', require('./routes/force-motion-refresh'));
+app.use('/motion-diagnostic', require('./routes/motion-api-diagnostic'));
 
 app.use((req, res) => {
   res.status(404).json({ error: 'Not found' });
