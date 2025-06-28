@@ -109,14 +109,14 @@ class MotionClient {
         payload.labels = taskData.labels;
       }
       
-      // Auto-scheduling temporarily disabled due to invalid schedule value
-      // payload.autoScheduled = {
-      //   startDate: new Date().toISOString().split('T')[0], // Today
-      //   deadlineType: 'HARD',
-      //   schedule: 'WORK_HOURS'  // ← Motion API doesn't recognize this value
-      // };
+      // Add auto-scheduling configuration
+      payload.autoScheduled = {
+        startDate: new Date().toISOString().split('T')[0], // Today
+        deadlineType: 'HARD',
+        schedule: 'Work'
+      };
       
-      logger.info('Creating Motion task', { payload });
+      logger.info('Creating Motion task with auto-scheduling', { payload });
       
       const response = await this.client.post('/tasks', payload);
       
@@ -194,14 +194,14 @@ class MotionClient {
         }
       }
       
-      // Auto-scheduling temporarily disabled due to invalid schedule value
-      // updatePayload.autoScheduled = {
-      //   startDate: new Date().toISOString().split('T')[0], // Today
-      //   deadlineType: 'HARD',
-      //   schedule: 'WORK_HOURS'  // ← Motion API doesn't recognize this value
-      // };
+      // Add auto-scheduling configuration for updates
+      updatePayload.autoScheduled = {
+        startDate: new Date().toISOString().split('T')[0], // Today
+        deadlineType: 'HARD',
+        schedule: 'Work'
+      };
       
-      logger.info('Updating Motion task', { 
+      logger.info('Updating Motion task with auto-scheduling', { 
         taskId, 
         payload: updatePayload,
         hasDuration: 'duration' in updatePayload,
