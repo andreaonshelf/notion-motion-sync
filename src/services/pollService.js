@@ -232,16 +232,16 @@ class PollService {
       
       for (const task of tasksToUpdate) {
         try {
-          // Log what we're about to send
+          // Build update payload - if no Motion ID, clear ALL Motion fields
           const updatePayload = {
             motionTaskId: task.motion_task_id || '',
-            motionStartOn: task.motion_start_on,
-            motionScheduledStart: task.motion_scheduled_start,
-            motionScheduledEnd: task.motion_scheduled_end,
-            motionStatus: task.motion_status_name,
-            motionSchedulingIssue: task.motion_scheduling_issue,
-            motionCompleted: task.motion_completed,
-            motionDeadlineType: task.motion_deadline_type
+            motionStartOn: task.motion_task_id ? task.motion_start_on : null,
+            motionScheduledStart: task.motion_task_id ? task.motion_scheduled_start : null,
+            motionScheduledEnd: task.motion_task_id ? task.motion_scheduled_end : null,
+            motionStatus: task.motion_task_id ? task.motion_status_name : null,
+            motionSchedulingIssue: task.motion_task_id ? task.motion_scheduling_issue : null,
+            motionCompleted: task.motion_task_id ? task.motion_completed : null,
+            motionDeadlineType: task.motion_task_id ? task.motion_deadline_type : null
           };
           
           logger.info(`Updating Notion task: ${task.notion_name}`, {
