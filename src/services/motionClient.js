@@ -143,7 +143,7 @@ class MotionClient {
         error: error.message,
         status: error.response?.status,
         data: error.response?.data,
-        payload: payload
+        taskData: taskData
       });
       throw error;
     }
