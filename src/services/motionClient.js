@@ -112,7 +112,7 @@ class MotionClient {
       // Add auto-scheduling configuration
       payload.autoScheduled = {
         startDate: new Date().toISOString().split('T')[0], // Today
-        deadlineType: 'HARD',
+        deadlineType: 'SOFT', // Changed from HARD to respect work hours
         schedule: 'Work'
       };
       
@@ -197,7 +197,7 @@ class MotionClient {
       // Add auto-scheduling configuration for updates
       updatePayload.autoScheduled = {
         startDate: new Date().toISOString().split('T')[0], // Today
-        deadlineType: 'HARD',
+        deadlineType: 'SOFT', // Changed from HARD to respect work hours
         schedule: 'Work'
       };
       
@@ -230,10 +230,11 @@ class MotionClient {
 
   async listTasks(params = {}) {
     try {
+      // TEMPORARY: Comment out workspace filter as it's filtering out all tasks
       // Add workspace filter if configured
-      if (config.motion.workspaceId) {
-        params.workspaceId = config.motion.workspaceId;
-      }
+      // if (config.motion.workspaceId) {
+      //   params.workspaceId = config.motion.workspaceId;
+      // }
       
       logger.info('Fetching Motion tasks with params', { params, method: 'listTasks' });
       

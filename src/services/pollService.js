@@ -138,13 +138,16 @@ class PollService {
       // Step 1: Refresh Motion scheduling data FIRST (catch recently created tasks)
       await this.refreshMotionSchedulingData();
       
-      // Step 2: Detect which tasks need Motion operations
+      // Step 2: Sync completed Motion tasks to Notion
+      await this.syncCompletedMotionTasks();
+      
+      // Step 3: Detect which tasks need Motion operations
       await this.detectMotionSyncNeeds();
       
-      // Step 3: Process Motion operations (rate-limited)
+      // Step 4: Process Motion operations (rate-limited)
       await this.processMotionOperations();
       
-      // Step 4: Refresh Motion scheduling data AGAIN (catch just-created tasks)
+      // Step 5: Refresh Motion scheduling data AGAIN (catch just-created tasks)
       await this.refreshMotionSchedulingData();
       
       // Step 5: Clean up orphaned Motion tasks - TEMPORARILY DISABLED
@@ -812,6 +815,93 @@ class PollService {
       
     } catch (error) {
       logger.error('Error refreshing Motion scheduling data', { error: error.message });
+    }
+  }
+
+  // Sync completed Motion tasks to Notion
+  async syncCompletedMotionTasks() {
+    try {
+      logger.info('Checking for completed Motion tasks...');
+      
+      // Get completed Motion tasks using status=Completed parameter
+      const motionClient = require('./motionClient');
+      const axios = require('axios');
+      const { config } = require('../config');
+      
+      const client = axios.create({
+        baseURL: config.motion.apiUrl,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': config.motion.apiKey
+        }
+      });
+      
+      // Fetch completed tasks from Motion
+      const completedResponse = await client.get('/tasks', { 
+        params: { status: 'Completed' } 
+      });
+      
+      const completedMotionTasks = completedResponse.data.tasks || [];
+      
+      if (completedMotionTasks.length === 0) {
+        logger.debug('No completed Motion tasks found');
+        return;
+      }
+      
+      logger.info(`Found ${completedMotionTasks.length} completed Motion tasks`);
+      
+      // Check which completed tasks exist in our database
+      let syncedCount = 0;
+      
+      for (const motionTask of completedMotionTasks) {
+        try {
+          // Find corresponding database record
+          const dbTask = await database.get(`
+            SELECT notion_page_id, notion_name, status 
+            FROM sync_tasks 
+            WHERE motion_task_id = $1
+          `, [motionTask.id]);
+          
+          if (dbTask) {
+            // Update Motion fields in database
+            await database.updateMotionFields(dbTask.notion_page_id, motionTask);
+            
+            // Update task status to completed in database if not already
+            if (dbTask.status !== 'Done') {
+              await database.run(`
+                UPDATE sync_tasks 
+                SET status = 'Done', 
+                    notion_sync_needed = true,
+                    motion_completed = true,
+                    motion_completed_time = $1
+                WHERE notion_page_id = $2
+              `, [motionTask.completedTime, dbTask.notion_page_id]);
+              
+              syncedCount++;
+              logger.info(`Marked task as completed: ${dbTask.notion_name}`, {
+                notionPageId: dbTask.notion_page_id,
+                motionTaskId: motionTask.id,
+                completedTime: motionTask.completedTime
+              });
+            }
+          } else {
+            logger.debug(`Completed Motion task not in database: ${motionTask.name} (${motionTask.id})`);
+          }
+          
+        } catch (error) {
+          logger.error(`Error processing completed task ${motionTask.name}`, { 
+            error: error.message,
+            motionTaskId: motionTask.id 
+          });
+        }
+      }
+      
+      if (syncedCount > 0) {
+        logger.info(`Synced ${syncedCount} completed tasks from Motion`);
+      }
+      
+    } catch (error) {
+      logger.error('Error syncing completed Motion tasks', { error: error.message });
     }
   }
 

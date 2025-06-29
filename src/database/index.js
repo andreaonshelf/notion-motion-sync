@@ -521,8 +521,43 @@ class DatabaseWrapper {
   }
   
   // Update Motion fields from Motion API response
+  // Calculate actual scheduling issues based on task data
+  calculateSchedulingIssue(motionData) {
+    const dueDate = motionData.dueDate ? new Date(motionData.dueDate) : null;
+    const scheduledEnd = motionData.scheduledEnd ? new Date(motionData.scheduledEnd) : null;
+    const now = new Date();
+    
+    // Task has scheduling issues if:
+    // 1. It's past due and not completed/canceled
+    // 2. It's scheduled to end after its due date
+    // 3. It's overdue and still active
+    const isPastDue = dueDate && dueDate < now;
+    const isScheduledPastDue = dueDate && scheduledEnd && scheduledEnd > dueDate;
+    const isActiveAndOverdue = isPastDue && motionData.status?.name && 
+                               !['Completed', 'Canceled'].includes(motionData.status.name);
+    
+    const hasSchedulingIssue = isPastDue || isScheduledPastDue || isActiveAndOverdue;
+    
+    logger.info('Calculated scheduling issue', {
+      taskName: motionData.name,
+      dueDate: motionData.dueDate,
+      scheduledEnd: motionData.scheduledEnd,
+      status: motionData.status?.name,
+      isPastDue,
+      isScheduledPastDue,
+      isActiveAndOverdue,
+      hasSchedulingIssue,
+      motionApiValue: motionData.schedulingIssue
+    });
+    
+    return hasSchedulingIssue;
+  }
+
   async updateMotionFields(notionPageId, motionData) {
     try {
+      // Calculate actual scheduling issue instead of trusting Motion API
+      const actualSchedulingIssue = this.calculateSchedulingIssue(motionData);
+      
       const query = `
         UPDATE sync_tasks 
         SET motion_start_on = $1,
@@ -543,7 +578,7 @@ class DatabaseWrapper {
         motionData.startOn || null,
         motionData.scheduledStart || null,
         motionData.scheduledEnd || null,
-        motionData.schedulingIssue || false,
+        actualSchedulingIssue,
         motionData.status?.name || null,
         motionData.status?.isResolvedStatus || false,
         motionData.completed || false,
