@@ -149,7 +149,22 @@ class NotionClient {
       priority: properties.Priority?.select?.name || 'Medium',
       dueDate: properties['Due date']?.date?.start || null,
       duration: properties['Duration (minutes)']?.number || null,
-      schedule: properties.Schedule?.checkbox || false,
+      schedule: (() => {
+        const scheduleValue = properties.Schedule?.checkbox;
+        const taskName = properties.Name?.title?.[0]?.plain_text || 'Unknown';
+        
+        // Debug specific tasks that should be scheduled
+        if (taskName.includes('Stress Test') || taskName.includes('Action Planning')) {
+          logger.info(`Schedule checkbox debug for "${taskName}":`, {
+            scheduleValue,
+            scheduleProperty: properties.Schedule,
+            hasScheduleProperty: 'Schedule' in properties,
+            allProperties: Object.keys(properties)
+          });
+        }
+        
+        return scheduleValue || false;
+      })(),
       startOn: properties['Start On']?.date?.start || null,
       motionTaskId: properties['Motion Task ID']?.rich_text?.[0]?.plain_text || null,
       lastSynced: null,

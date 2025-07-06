@@ -6,6 +6,8 @@ class MotionClient {
   constructor() {
     // Store API key as instance property
     this.apiKey = config.motion.apiKey;
+    this.workspaceId = null; // Will be populated dynamically
+    this.workspacesFetched = false;
     
     // Log API key details for debugging
     logger.info('Motion API key configured', { 
@@ -62,13 +64,104 @@ class MotionClient {
     );
   }
 
+  async getWorkspaceId() {
+    // Return cached workspace ID if already fetched
+    if (this.workspaceId && this.workspacesFetched) {
+      return this.workspaceId;
+    }
+    
+    try {
+      logger.info('Fetching workspaces from Motion API to auto-detect workspace ID');
+      const response = await this.client.get('/workspaces');
+      
+      if (response.data && response.data.workspaces && response.data.workspaces.length > 0) {
+        const workspaces = response.data.workspaces;
+        
+        // First, try to find the workspace ID from env variable if it exists in the list
+        const envWorkspaceId = config.motion.workspaceId;
+        const envWorkspace = workspaces.find(w => w.id === envWorkspaceId);
+        
+        if (envWorkspace) {
+          this.workspaceId = envWorkspace.id;
+          this.workspacesFetched = true;
+          
+          logger.info('Using workspace ID from environment (validated against API)', {
+            workspaceId: this.workspaceId,
+            workspaceName: envWorkspace.name,
+            source: 'environment variable (validated)'
+          });
+          
+          return this.workspaceId;
+        }
+        
+        // Fallback: Use the first workspace
+        this.workspaceId = workspaces[0].id;
+        this.workspacesFetched = true;
+        
+        logger.info('Auto-detected workspace ID from Motion API', {
+          workspaceId: this.workspaceId,
+          workspaceName: workspaces[0].name,
+          totalWorkspaces: workspaces.length,
+          allWorkspaces: workspaces.map(w => ({ id: w.id, name: w.name })),
+          envWorkspaceId: envWorkspaceId,
+          envWorkspaceValid: false,
+          source: 'auto-detected (first workspace)'
+        });
+        
+        return this.workspaceId;
+      } else {
+        logger.warn('No workspaces found in Motion API response', { responseData: response.data });
+        
+        // Last resort: try the env variable even though we couldn't validate it
+        if (config.motion.workspaceId) {
+          logger.warn('Using unvalidated workspace ID from environment as last resort', {
+            workspaceId: config.motion.workspaceId
+          });
+          this.workspaceId = config.motion.workspaceId;
+          this.workspacesFetched = true;
+          return this.workspaceId;
+        }
+        
+        return null;
+      }
+    } catch (error) {
+      logger.error('Failed to fetch workspaces from Motion API, falling back to env variable', {
+        error: error.message,
+        status: error.response?.status,
+        data: error.response?.data,
+        fallbackWorkspaceId: config.motion.workspaceId
+      });
+      
+      // Fallback to env variable if API call fails
+      if (config.motion.workspaceId) {
+        this.workspaceId = config.motion.workspaceId;
+        this.workspacesFetched = true;
+        logger.info('Using workspace ID from environment (API unavailable)', {
+          workspaceId: this.workspaceId,
+          source: 'environment variable (fallback)'
+        });
+        return this.workspaceId;
+      }
+      
+      return null;
+    }
+  }
+
   async createTask(taskData) {
     try {
       // Start with minimal required fields
       const payload = {
-        name: taskData.name,
-        workspaceId: config.motion.workspaceId
+        name: taskData.name
       };
+      
+      // Auto-detect workspace ID from Motion API
+      const workspaceId = await this.getWorkspaceId();
+      if (workspaceId) {
+        payload.workspaceId = workspaceId;
+        logger.info('Using auto-detected workspace ID for task creation', { workspaceId });
+      } else {
+        logger.warn('No workspace ID available - creating task without workspace ID');
+      }
       
       // Only add optional fields if they have values
       if (taskData.description) {
@@ -151,10 +244,7 @@ class MotionClient {
 
   async updateTask(taskId, taskData) {
     try {
-      const updatePayload = {
-        // Always include workspaceId to ensure task stays in correct workspace
-        workspaceId: config.motion.workspaceId
-      };
+      const updatePayload = {};
       
       // Only include fields that are provided
       if (taskData.name !== undefined) {
@@ -169,9 +259,8 @@ class MotionClient {
         updatePayload.dueDate = taskData.dueDate;
       }
       
-      if (taskData.startOn !== undefined) {
-        updatePayload.startOn = taskData.startOn;
-      }
+      // Remove startOn field - Motion API doesn't accept it in updates
+      // Use autoScheduled.startDate instead
       
       if (taskData.priority !== undefined) {
         updatePayload.priority = this.mapPriority(taskData.priority);
@@ -230,10 +319,11 @@ class MotionClient {
 
   async listTasks(params = {}) {
     try {
-      // TEMPORARY: Comment out workspace filter as it's filtering out all tasks
-      // Add workspace filter if configured
-      // if (config.motion.workspaceId) {
-      //   params.workspaceId = config.motion.workspaceId;
+      // Optionally filter by workspace ID if auto-detection is successful
+      // Note: Commenting this out for now as it may filter out existing tasks
+      // const workspaceId = await this.getWorkspaceId();
+      // if (workspaceId) {
+      //   params.workspaceId = workspaceId;
       // }
       
       logger.info('Fetching Motion tasks with params', { params, method: 'listTasks' });

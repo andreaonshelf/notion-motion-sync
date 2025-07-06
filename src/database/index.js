@@ -218,9 +218,19 @@ class DatabaseWrapper {
         OR sync_tasks.status IS DISTINCT FROM EXCLUDED.status
         OR sync_tasks.priority IS DISTINCT FROM EXCLUDED.priority
         OR sync_tasks.start_on IS DISTINCT FROM EXCLUDED.start_on
+        OR sync_tasks.notion_name IS DISTINCT FROM EXCLUDED.notion_name
       RETURNING *;
     `;
     
+    // Debug logging for schedule field issues
+    if (data.name && (data.name.includes('Stress Test') || data.name.includes('Action Planning') || data.name.includes('Lets try once more'))) {
+      logger.info(`Database upsert debug for "${data.name}":`, {
+        inputSchedule: data.schedule,
+        scheduleParameter: data.schedule || false,
+        allInputData: data
+      });
+    }
+
     const result = await this.pool.query(query, [
       notionPageId,
       data.name || null,
@@ -440,11 +450,14 @@ class DatabaseWrapper {
   // Multi-speed sync methods
 
   // Get tasks that need Motion operations (slow sync)
-  async getMotionTasksToProcess(limit = 5) {
+  async getMotionTasksToProcess(limit = 20) {
     const query = `
       SELECT * FROM sync_tasks 
       WHERE motion_sync_needed = true
-        AND (motion_last_attempt IS NULL OR motion_last_attempt < NOW() - INTERVAL '2 minutes')
+        AND (
+          motion_last_attempt IS NULL 
+          OR motion_last_attempt < NOW() - INTERVAL '2 minutes'
+        )
       ORDER BY 
         motion_priority ASC,
         motion_last_attempt ASC NULLS FIRST,
@@ -452,6 +465,20 @@ class DatabaseWrapper {
       LIMIT $1
     `;
     const result = await this.pool.query(query, [limit]);
+    
+    // Log details about tasks being processed
+    if (result.rows.length > 0) {
+      logger.info(`Found ${result.rows.length} tasks needing Motion operations:`, {
+        tasks: result.rows.map(t => ({
+          name: t.notion_name,
+          scheduled: t.schedule_checkbox,
+          hasMotionId: !!t.motion_task_id,
+          priority: t.motion_priority,
+          lastAttempt: t.motion_last_attempt
+        }))
+      });
+    }
+    
     return result.rows;
   }
 
